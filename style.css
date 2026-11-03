@@ -232,3 +232,5 @@ input[type="date"] {
 
 #quote { scroll-margin-top: 70px; }
 .panel .guide-link { background: var(--cream); margin: 0 0 16px; }
+
+.from { font-size: 15px; background: var(--cream); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; }

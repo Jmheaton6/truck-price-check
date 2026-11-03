@@ -208,7 +208,7 @@ function card(r, actions = "") {
       <span class="status status-${esc(r.status)}">${esc(STATUS[r.status] || r.status)}</span>
       <time>${esc(time(r.created_at))}</time>
     </div>
-    <h3>${esc(t.type)} → ${esc(r.destination)}</h3>
+    <h3>${esc(t.type)}: Findlay → ${esc(r.destination)}</h3>
     <p class="meta">${esc(r.loads)} loads · Ships ${esc(fmtDate(shipDateOf(r)))} (${esc(noticeText(noticeOf(r)))}) ${flex}</p>
     <p class="card-money"><strong>${money(r.profit_per_truck)}</strong> profit / truck
       <span class="verdict-sm"><span class="dot"></span>${esc(VERDICT[r.color] || "")}</span></p>
@@ -285,6 +285,7 @@ function requestView(team, store, state) {
       <p class="eyebrow">${t.name}</p>
       <h1>${t.ask}</h1>
       <p class="lede">Pick where, how many and the ship date. The price tag shows what Ball keeps after trucking. Then send it to the hub.</p>
+      <p class="from">Ships from <strong>Ball's Findlay, OH plant</strong> (the pilot plant)</p>
       <label class="field"><span class="label">${t.dest}</span>
         <select id="dest">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select>
       </label>
@@ -404,9 +405,9 @@ function logisticsView(store, state) {
     </section>
     <section class="panel" id="quote">
       <h2>Got a spot quote? Enter it here</h2>
-      <p class="lede">Type the price a spot carrier quoted you. Every team's price tag for that lane updates right away.</p>
+      <p class="lede">Type the price a spot carrier quoted you. Every team's price tag for that lane updates right away. All lanes start at Ball's Findlay, OH plant (the pilot).</p>
       <label class="field"><span class="label">Lane</span>
-        <select id="q-lane">${LANES.map((l) => `<option value="${esc(laneKey(l))}">${esc(l.destination)} (${l.kind === "order" ? "customer" : "transfer"})</option>`).join("")}</select>
+        <select id="q-lane">${LANES.map((l) => `<option value="${esc(laneKey(l))}">Findlay → ${esc(l.destination)} (${l.kind === "order" ? "customer" : "transfer"})</option>`).join("")}</select>
       </label>
       <label class="field"><span class="label">Spot truck price, per truck</span>
         <span class="money-input"><span>$</span><input id="q-price" type="number" inputmode="numeric" min="0" max="20000" step="1"></span>
@@ -421,7 +422,7 @@ function logisticsView(store, state) {
       <details>
         <summary>Lane price list (Findlay)</summary>
         <div class="table-wrap"><table class="prices">
-          <thead><tr><th>Lane</th><th>Trucks that go spot</th><th>Contract truck</th><th>Spot truck</th></tr></thead>
+          <thead><tr><th>Lane (from Findlay, OH)</th><th>Trucks that go spot</th><th>Contract truck</th><th>Spot truck</th></tr></thead>
           <tbody id="price-rows"></tbody>
         </table></div>
         <p class="small">Contract and spot prices are 2026 averages unless Logistics entered a quote today.</p>
