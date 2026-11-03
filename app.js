@@ -13,7 +13,7 @@ const WEEKS = ["This week", "Next week", "In 2 weeks", "In 3 weeks"];
 const VERDICT = {
   green: "Go: good business",
   yellow: "Talk to Logistics first",
-  red: "Rethink it: little or no profit left",
+  red: "Rethink: change the timing or the place",
 };
 const STATUS = { new: "Waiting on Logistics", contract: "Booked on contract", spot: "Needs spot truck" };
 
@@ -36,6 +36,7 @@ const TEAMS = {
   logistics: { name: "Logistics" },
   hub: { name: "Live Hub" },
   carrier: { name: "Carrier view" },
+  how: { name: "How it works" },
 };
 
 function laneFor(kind, destination) {
@@ -43,12 +44,13 @@ function laneFor(kind, destination) {
 }
 
 function price(lane, week) {
-  const spot_chance = week === 0 ? 1 : lane.spot_share;
+  const spot_chance = week === 0 ? 1 : Math.round(lane.spot_share * 100) / 100;
   const base = lane.kind === "transfer" ? lane.contract_cost : 0;
-  const extra_cost = Math.round(base + spot_chance * lane.spot_premium);
+  const spot_risk = Math.round(spot_chance * lane.spot_premium);
+  const extra_cost = base + spot_risk;
   const profit_per_truck = PROFIT_PER_TRUCK - extra_cost;
   const color = profit_per_truck >= GREEN_AT ? "green" : profit_per_truck >= YELLOW_AT ? "yellow" : "red";
-  return { spot_chance, extra_cost, profit_per_truck, color };
+  return { spot_chance, extra_cost, profit_per_truck, color, spot_risk };
 }
 
 // ---------- Data store: Supabase when configured, this browser otherwise ----------
@@ -113,13 +115,12 @@ function toast(msg, bad = false) {
 // ---------- Shared pieces ----------
 function priceTag(lane, week, loads, team) {
   const p = price(lane, week);
-  const spotRisk = Math.round(p.spot_chance * lane.spot_premium);
   const lines = [];
-  if (lane.kind === "transfer") lines.push(`Truck move on contract: ${money(lane.contract_cost)}`);
+  if (lane.kind === "transfer") lines.push(`Truck to move the cans (contract price): ${money(lane.contract_cost)}`);
   lines.push(week === 0
-    ? `Spot risk: short notice, so we assume a spot truck (+${money(lane.spot_premium)})`
-    : `Spot risk: ${pct(lane.spot_share)} chance × ${money(lane.spot_premium)} spot premium = ${money(spotRisk)}`);
-  lines.push(`${loads} loads = ${money(p.extra_cost * loads)} extra trucking`);
+    ? `Shipping this week is last-minute, so we count a spot truck: +${money(lane.spot_premium)}`
+    : `${pct(lane.spot_share)} of trucks on this lane end up spot, at ${money(lane.spot_premium)} extra each: +${money(p.spot_risk)}`);
+  lines.push(`${loads} loads × ${money(p.extra_cost)} = ${money(p.extra_cost * loads)} extra trucking`);
   let nudge = "";
   if (week === 0) {
     const later = price(lane, 1);
@@ -137,6 +138,7 @@ function priceTag(lane, week, loads, team) {
     <p class="big">${money(p.profit_per_truck)}<small>profit per truck</small></p>
     <p class="math">${money(PROFIT_PER_TRUCK)} profit − ${money(p.extra_cost)} extra trucking</p>
     <ul class="why">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>
+    <a class="how-link" href="?role=how#example">How is this figured?</a>
     ${nudge}
   </div>`;
 }
@@ -192,6 +194,7 @@ function homeView() {
       <p class="eyebrow">Ball · Findlay pilot</p>
       <h1>One price tag every team sees before they decide.</h1>
       <p class="lede">Pick your team. Everything you send shows up on the Live Hub for everyone, right away.</p>
+      <a class="guide-link" href="?role=how"><strong>New here?</strong> See how it works in 1 minute →</a>
       <div class="team-grid">
         ${tile("sales", "A customer wants extra loads")}
         ${tile("production", "Schedule an extra run")}
@@ -212,6 +215,7 @@ function requestView(team, store, state) {
   const html = `<section class="panel">
       <p class="eyebrow">${t.name}</p>
       <h1>${t.ask}</h1>
+      <p class="lede">Pick where, how many and when. The price tag shows what Ball keeps after trucking. Then send it to the hub.</p>
       <label class="field"><span class="label">${t.dest}</span>
         <select id="dest">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select>
       </label>
@@ -318,14 +322,14 @@ function logisticsView(store, state) {
   const html = `<section class="panel">
       <p class="eyebrow">Logistics</p>
       <h1>Book the trucks</h1>
-      <p class="lede">Every team's requests land here. Book them on contract when you can.</p>
+      <p class="lede">Every team's requests land here. Book a contract truck (cheaper, set in advance) when you can. Mark "Needs spot" when you have to buy a last-minute truck. <a href="?role=how">How it works</a></p>
       <div id="incoming" class="cards"></div>
     </section>
     <section class="panel">
       <details>
         <summary>Lane price list (Findlay, 2026 data)</summary>
         <div class="table-wrap"><table class="prices">
-          <thead><tr><th>Lane</th><th>Spot share</th><th>Truck move</th><th>Spot premium</th></tr></thead>
+          <thead><tr><th>Lane</th><th>Trucks that go spot</th><th>Contract truck</th><th>Extra for a spot truck</th></tr></thead>
           <tbody>${LANES.map((l) => `<tr><th scope="row">${esc(l.destination)} <span class="kind">${l.kind === "order" ? "Customer" : "Transfer"}</span></th>
             <td>${pct(l.spot_share)}</td><td>${l.kind === "transfer" ? money(l.contract_cost) : "In price"}</td><td>${money(l.spot_premium)}</td></tr>`).join("")}</tbody>
         </table></div>
@@ -366,7 +370,7 @@ function hubView(store, state) {
   const html = `<section class="hub">
       <div class="hub-head">
         <div><p class="eyebrow">Ball · Findlay pilot</p><h1>Live Hub</h1>
-        <p class="lede">Every team's decisions with the same price tag, as they happen.</p></div>
+        <p class="lede">Every team's decisions with the same price tag, as they happen. <a href="?role=how">How it works</a></p></div>
         <span class="live"><span class="pulse"></span>${store.live ? "Live" : "Local demo"}</span>
       </div>
       <div id="totals" class="totals"></div>
@@ -404,7 +408,7 @@ function hubView(store, state) {
     const tile = (label, value, sub = "") => `<div class="stat"><p class="stat-label">${label}</p><p class="stat-value">${value}</p>${sub ? `<p class="stat-sub">${sub}</p>` : ""}</div>`;
     $("#totals").innerHTML =
       tile("Requests", rows.length, `<span class="c c-green">${colors.green}</span> <span class="c c-yellow">${colors.yellow}</span> <span class="c c-red">${colors.red}</span>`) +
-      tile("Profit kept", money(profit)) +
+      tile("Profit left after trucking", money(profit)) +
       tile("Extra trucking", money(extra)) +
       tile("Trucks likely on spot", Math.round(spot));
     $("#feed").innerHTML = rows.length ? rows.map((r) => card(r)).join("") : `<p class="empty">Waiting for the first request…</p>`;
@@ -422,6 +426,80 @@ function carrierView() {
       <div id="outlook"></div>
     </section>`;
   return { html, live: (rows) => ($("#outlook").innerHTML = outlookTable(rows)) };
+}
+
+function howView() {
+  const lane = laneFor("transfer", "Mississauga, ON");
+  const loads = 10;
+  const now = price(lane, 0);
+  const later = price(lane, 1);
+  const save = (later.profit_per_truck - now.profit_per_truck) * loads;
+  const tag = (p) => `<span class="mini mini-${p.color}">${money(p.profit_per_truck)} · ${p.color[0].toUpperCase() + p.color.slice(1)}</span>`;
+  const html = `<section class="panel how">
+      <p class="eyebrow">1-minute guide</p>
+      <h1>Every truck gets a price tag.</h1>
+
+      <h2>The problem</h2>
+      <ul class="plain">
+        <li>Ball's teams each chase their own goal. Nobody sees what trucking costs until the bill shows up 1–2 months later.</li>
+        <li>When a truck is needed at the last minute, Ball pays extra for a <strong>spot truck</strong>. In 2026, <strong>15.8%</strong> of loads went spot (6.4% in 2025). That cost <strong>$18.9 million</strong> extra in 7 months.</li>
+        <li><strong>64%</strong> of those spot loads were Ball moving its own cans between its own sites, which Ball schedules itself.</li>
+      </ul>
+
+      <h2>Two kinds of trucks</h2>
+      <div class="two">
+        <div class="box box-mint"><h3>Contract truck</h3><p>Booked ahead with a carrier at a set price. Cheaper.</p></div>
+        <div class="box box-red"><h3>Spot truck</h3><p>Found at the last minute at market price. Costs more.</p></div>
+      </div>
+
+      <h2>The price tag</h2>
+      <div class="formula">
+        <div><strong>$3,100</strong><span>what one truckload of cans earns Ball</span></div>
+        <div class="op">−</div>
+        <div><strong>Extra trucking</strong><span>the trucking this decision adds</span></div>
+        <div class="op">=</div>
+        <div><strong>Profit per truck</strong><span>what Ball keeps</span></div>
+      </div>
+      <p class="note">$3,100 is an average: Ball's 2025 can profit in North America divided by the truckloads it ships.</p>
+
+      <h2 id="example">One example, step by step</h2>
+      <p>Inventory Planning wants to move ${loads} truckloads of cans from Findlay to ${esc(lane.destination)}.</p>
+      <ol class="steps">
+        <li><strong>A truck to move the cans</strong> costs ${money(lane.contract_cost)} on a contract truck.</li>
+        <li><strong>Shipping this week?</strong> That's too late to book a contract truck, so we count a spot truck: <strong>+${money(lane.spot_premium)}</strong>.<br>
+          ${money(PROFIT_PER_TRUCK)} − ${money(now.extra_cost)} = ${tag(now)}</li>
+        <li><strong>Shipping next week?</strong> Only ${pct(lane.spot_share)} of trucks on this lane end up spot, so the risk is ${pct(lane.spot_share)} × ${money(lane.spot_premium)} = <strong>+${money(later.spot_risk)}</strong>.<br>
+          ${money(PROFIT_PER_TRUCK)} − ${money(later.extra_cost)} = ${tag(later)}</li>
+        <li><strong>Waiting one week saves ${money(save)}</strong> on ${loads} loads. The app shows this before anyone decides.</li>
+      </ol>
+
+      <h2>What the colors mean</h2>
+      <ul class="colors">
+        <li><span class="mini mini-green">$2,000+</span> Go: good business.</li>
+        <li><span class="mini mini-yellow">$1,000–$1,999</span> Talk to Logistics first.</li>
+        <li><span class="mini mini-red">Under $1,000</span> Rethink: change the timing or the place.</li>
+      </ul>
+      <p class="note">The cutoffs are examples. Ball's finance team would set the real ones.</p>
+
+      <h2>Who does what</h2>
+      <table class="who"><tbody>
+        <tr><th>Sales</th><td>Checks the price before saying yes to extra customer loads.</td></tr>
+        <tr><th>Production</th><td>Checks the price before an extra run that has to be trucked to a warehouse.</td></tr>
+        <tr><th>Inventory Planning</th><td>Checks the price before moving cans between sites.</td></tr>
+        <tr><th>Logistics</th><td>Sees every request early and books contract trucks.</td></tr>
+        <tr><th>Live Hub</th><td>Everyone sees the same requests and totals as they happen.</td></tr>
+        <tr><th>Carriers</th><td>Get a 4-week look ahead so they can hold trucks for Ball.</td></tr>
+      </tbody></table>
+
+      <details class="source"><summary>Where the numbers come from</summary>
+        <p>Ball's case workbook (Detail sheet), Findlay plant, January–July 2026, with short yard moves (shuttles) left out.
+        "Trucks that go spot" is the share of a lane's loads that went on spot trucks. "Extra for a spot truck" is the lane's average spot cost minus its average contract cost.
+        "This week" counts as a spot truck because the data is monthly and can't show how much notice each load had. That's an assumption.</p>
+      </details>
+
+      <a class="cta" href="./">Try it: pick a team</a>
+    </section>`;
+  return { html };
 }
 
 // ---------- Boot ----------
@@ -449,6 +527,7 @@ async function main() {
     : team === "logistics" ? logisticsView(store, state)
     : team === "hub" ? hubView(store, state)
     : team === "carrier" ? carrierView()
+    : team === "how" ? howView()
     : requestView(team, store, state);
 
   $("#app").innerHTML = view.html;
