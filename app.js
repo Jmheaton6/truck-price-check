@@ -66,6 +66,12 @@ function price(lane, noticeDays) {
   return { spot_chance, extra_cost, profit_per_truck, color, spot_risk };
 }
 
+// The price fields saved with a request (spot_risk is display-only).
+function priceFields(lane, noticeDays) {
+  const { spot_chance, extra_cost, profit_per_truck, color } = price(lane, noticeDays);
+  return { spot_chance, extra_cost, profit_per_truck, color };
+}
+
 // ---------- Data store: Supabase when configured, this browser otherwise ----------
 async function makeStore() {
   if (SUPABASE_URL && SUPABASE_KEY) {
@@ -339,7 +345,7 @@ function requestView(team, store, state) {
     const row = {
       team, kind: t.kind, destination: form.destination, loads: form.loads,
       ship_date: form.shipDate, notice_days: notice(),
-      flex: team === "sales" ? form.flex : null, ...price(lane, notice()),
+      flex: team === "sales" ? form.flex : null, ...priceFields(lane, notice()),
     };
     btn.disabled = true;
     try {
@@ -360,7 +366,7 @@ function requestView(team, store, state) {
     btn.disabled = true;
     try {
       const date = addDays(today(), SHORT_NOTICE_DAYS);
-      await store.update(r.id, { ship_date: date, notice_days: SHORT_NOTICE_DAYS, ...price(lane, SHORT_NOTICE_DAYS) });
+      await store.update(r.id, { ship_date: date, notice_days: SHORT_NOTICE_DAYS, ...priceFields(lane, SHORT_NOTICE_DAYS) });
       toast(`Moved to ${fmtDate(date)}.`);
       state.refresh();
     } catch (err) {
