@@ -350,3 +350,9 @@ body[data-role="logistics"] main { max-width: 960px; }
 .tab-count { display: inline-block; min-width: 22px; margin-left: 6px; padding: 0 7px; border-radius: 999px;
   background: var(--ink); color: var(--white); font-size: 13px; text-align: center; }
 .tab-panel[hidden] { display: none; }
+
+/* ---------- Book-by deadlines ---------- */
+.due { border-radius: 999px; padding: 2px 10px; font-weight: 600; background: rgba(255,255,255,.7); color: var(--ink); border: 1px solid #cfccc4; }
+.due-soon { background: var(--red); color: var(--white); border-color: var(--red); }
+.due-missed { background: var(--white); color: var(--red); border: 1.5px dashed var(--red); }
+.tab-urgent { background: var(--red); }

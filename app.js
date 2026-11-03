@@ -18,7 +18,7 @@ const VERDICT = {
   yellow: "Talk to Logistics first",
   red: "Rethink: change the timing or the place",
 };
-const STATUS = { new: "Waiting on Logistics", contract: "Booked", spot: "Carrier said no: all spot" };
+const STATUS = { new: "Waiting on Logistics", contract: "Booked", spot: "Booked on spot" };
 
 const TEAMS = {
   sales: {
@@ -93,8 +93,9 @@ function allocate(rows, draft) {
     const cap = lane.contract_per_week;
     const room = Math.max(0, cap - usedBefore);
     let contract, reason = null;
-    if (r.status === "spot") { contract = 0; reason = "carrier"; }
-    else if (noticeOf(r) < SHORT_NOTICE_DAYS) { contract = 0; reason = "notice"; }
+    if (noticeOf(r) < SHORT_NOTICE_DAYS) { contract = 0; reason = "notice"; }
+    else if (r.status === "spot") { contract = 0; reason = "carrier"; }
+    else if (r.status === "new" && daysBetween(today(), shipDateOf(r)) < SHORT_NOTICE_DAYS) { contract = 0; reason = "late"; }
     else { contract = Math.min(r.loads, room); if (contract < r.loads) reason = "full"; }
     used.set(key, usedBefore + contract);
     out.set(r.id, { lane, week, cap, usedBefore, room, contract, spot: r.loads - contract, reason, notice: noticeOf(r),
@@ -104,12 +105,23 @@ function allocate(rows, draft) {
 }
 
 function reasonText(a) {
-  if (a.reason === "carrier") return "Carrier said no, so all spot";
+  if (a.reason === "carrier") return "Booked on spot (the carrier said no, or it was booked too late)";
+  if (a.reason === "late") return `Not booked in time: under ${SHORT_NOTICE_DAYS} days to ship, so the contract trucks are gone and it's all spot`;
   if (a.reason === "notice") return `Only ${noticeText(a.notice)}: contract carriers need ${SHORT_NOTICE_DAYS}+ days, so all spot`;
   if (a.reason === "full") return a.contract
     ? `Contract full: only ${a.room} of ~${a.cap} contract trucks were left that week`
     : `Contract full: all ~${a.cap} contract trucks that week were already taken`;
   return "All on contract";
+}
+
+// Logistics has to book a request at least SHORT_NOTICE_DAYS before it ships.
+const bookBy = (r) => addDays(shipDateOf(r), -SHORT_NOTICE_DAYS);
+function bookByPill(r) {
+  if (r.status !== "new") return "";
+  const left = daysBetween(today(), bookBy(r));
+  if (left < 0) return `<span class="due due-missed">Book-by missed: now spot</span>`;
+  const when = left === 0 ? "today" : left === 1 ? "1 day left" : `${left} days left`;
+  return `<span class="due${left <= 2 ? " due-soon" : ""}">Book by ${esc(fmtDate(bookBy(r)))} · ${when}</span>`;
 }
 
 // The earliest date in the next 4 weeks (3+ days out) that puts more of this request on contract.
@@ -289,6 +301,7 @@ function card(r, a, actions = "") {
     <div class="card-head">
       <span class="pill">${esc(t.name)}</span>
       <span class="status status-${esc(r.status)}">${esc(STATUS[r.status] || r.status)}</span>
+      ${bookByPill(r)}
       <time>${esc(time(r.created_at))}</time>
     </div>
     <h3>${esc(t.type)}: Findlay → ${esc(r.destination)}</h3>
@@ -498,7 +511,9 @@ function requestView(team, store, state) {
     if (!form.shipDate || form.shipDate < today()) form.shipDate = today();
     $("#ship").value = form.shipDate;
     const n = notice();
-    $("#notice-line").innerHTML = `${fmtDate(form.shipDate)} · <strong>${noticeText(n)}</strong>${n < SHORT_NOTICE_DAYS ? ` (under ${SHORT_NOTICE_DAYS} days: spot only)` : ""}`;
+    $("#notice-line").innerHTML = `${fmtDate(form.shipDate)} · <strong>${noticeText(n)}</strong>${n < SHORT_NOTICE_DAYS
+      ? ` (under ${SHORT_NOTICE_DAYS} days: spot only)`
+      : ` · Logistics must book it by <strong>${fmtDate(addDays(form.shipDate, -SHORT_NOTICE_DAYS))}</strong> to keep contract trucks`}`;
     const a = draftAlloc();
     const better = a.spot ? betterDate(state.rows, draftRow(), a, true) : null;
     $("#tag").innerHTML = priceTag(a, better, team);
@@ -588,7 +603,7 @@ function logisticsView(store, state) {
     </section>
     <div class="tab-panel" data-panel="requests">
     <section class="panel">
-      <p class="lede">Every team's requests land here with their contract / spot split already worked out from each lane's contract trucks for that week. Confirm the booking, or mark it if the contract carrier says no. <a href="?role=how">How it works</a></p>
+      <p class="lede">Every team's requests land here with their contract / spot split already worked out. <strong>Book each one by its "Book by" date</strong> (${SHORT_NOTICE_DAYS} days before it ships) or its contract trucks are lost and it goes spot. Soonest deadline first. <a href="?role=how">How it works</a></p>
       <h2 id="todo-title" class="sub-h">Needs a decision</h2>
       <div id="incoming" class="cards"></div>
       <div id="done"></div>
@@ -688,18 +703,25 @@ function logisticsView(store, state) {
     const todo = rows.filter((r) => r.status === "new").sort(byShip);
     const done = rows.filter((r) => r.status !== "new").sort(byShip);
     $("#todo-title").textContent = todo.length ? `Needs a decision (${todo.length})` : "Needs a decision";
-    $("#tab-requests").innerHTML = todo.length ? `Requests <span class="tab-count">${todo.length}</span>` : "Requests";
+    const urgent = todo.filter((r) => daysBetween(today(), bookBy(r)) <= 2).length;
+    $("#tab-requests").innerHTML = todo.length
+      ? `Requests <span class="tab-count">${todo.length}</span>${urgent ? `<span class="tab-count tab-urgent">${urgent} due soon</span>` : ""}`
+      : "Requests";
     $("#incoming").innerHTML = todo.length
       ? todo.map((r) => {
           const a = alloc.get(r.id);
-          return card(r, a, `${a ? `<p class="room">${roomLine(a)}</p>` : ""}<div class="card-actions">
-          <button type="button" class="util" data-status="contract" data-id="${esc(r.id)}">Confirm booking</button>
-          <button type="button" class="util" data-status="spot" data-id="${esc(r.id)}">Carrier said no → spot</button>
+          // Past the book-by date the contract trucks are gone: the only option left is a spot truck.
+          const late = a && (a.reason === "late" || a.reason === "notice");
+          return card(r, a, `${a && !late ? `<p class="room">${roomLine(a)}</p>` : ""}<div class="card-actions">
+          ${late
+            ? `<button type="button" class="util" data-status="spot" data-id="${esc(r.id)}">Book spot truck</button>`
+            : `<button type="button" class="util" data-status="contract" data-id="${esc(r.id)}">Confirm booking</button>
+          <button type="button" class="util" data-status="spot" data-id="${esc(r.id)}">Carrier said no → spot</button>`}
         </div>`);
         }).join("")
       : `<p class="empty">${rows.length ? "All caught up. Every request has a decision." : "No requests yet. They'll appear here the moment another team sends one."}</p>`;
     $("#done").innerHTML = done.length ? `<details id="done-box" class="done-box"${doneOpen ? " open" : ""}>
-        <summary>Done (${done.length}): booked or carrier said no</summary>
+        <summary>Done (${done.length}): booked on contract or spot</summary>
         <ul class="done-list">${done.map((r) => {
           const a = alloc.get(r.id);
           return `<li>
@@ -727,7 +749,7 @@ function hubView(store, state) {
       <div id="totals" class="totals"></div>
       <section class="cal-panel">
         <div class="cal-top"><h2>Trucks going out</h2>
-          <p class="legend"><span class="key key-contract"></span> on contract <span class="key key-spot"></span> on spot (contract full, short notice or carrier said no)</p></div>
+          <p class="legend"><span class="key key-contract"></span> on contract <span class="key key-spot"></span> on spot (contract full, short notice, booked late or carrier said no)</p></div>
         <div id="calendar"></div>
       </section>
       <div class="hub-grid">
@@ -787,7 +809,7 @@ function hubView(store, state) {
     const tile = (label, value, sub = "", cls = "") => `<div class="stat ${cls}"><p class="stat-label">${label}</p><p class="stat-value">${value}</p>${sub ? `<p class="stat-sub">${sub}</p>` : ""}</div>`;
     $("#totals").innerHTML =
       tile("Trucks on contract", t.contract, "within each lane's weekly contract", "stat-contract") +
-      tile("Trucks on spot", t.spot, "contract full, short notice or carrier said no") +
+      tile("Trucks on spot", t.spot, "contract full, short notice, booked late or carrier said no") +
       tile("Spot overspend", money(t.overspend), "what spot trucks cost above contract prices. Planning ahead saves this.", "stat-spot") +
       tile("Profit left", money(t.profit), `${money(t.making)} the cans earn − ${money(t.extra)} extra trucking`);
     $("#contracts").innerHTML = contractsTable();
@@ -863,6 +885,8 @@ function howView() {
         <li><strong>Production ships the week after instead.</strong> That week's contract trucks are open, so all 10 go on contract → ${tag(moved)}.
           <strong>Saves ${money(moved.profit - two.profit)}.</strong> The app suggests this date automatically.</li>
         <li><strong>Anything with less than ${SHORT_NOTICE_DAYS} days' notice goes on spot</strong>, even if contract trucks are open: 10 × ${money(rush.sEach)} → ${tag(rush)}</li>
+        <li><strong>The clock runs.</strong> Logistics has to book step 1's trucks by ${fmtDate(addDays(wed, -SHORT_NOTICE_DAYS))}. If they're still waiting after that, the contract trucks are lost and all 10 go spot → ${tag(rush)}.
+          That's why every card shows a "Book by" date, and Logistics works the soonest deadline first.</li>
       </ol>
       <p class="note">Every team sees this the moment they pick a lane and date, before they send anything.</p>
 
@@ -879,7 +903,7 @@ function howView() {
         <tr><th>Sales</th><td>Sees whether extra customer loads fit on contract that week, and what Ball keeps, before saying yes.</td></tr>
         <tr><th>Production</th><td>Sees whether an extra run's trucks to the warehouse fit on contract, and picks a better week if not.</td></tr>
         <tr><th>Inventory Planning</th><td>Sees whether a move between sites fits on contract, and picks a better week if not.</td></tr>
-        <tr><th>Logistics</th><td>Confirms each booking, marks when a carrier says no, and types in real spot quotes so every price tag is current.</td></tr>
+        <tr><th>Logistics</th><td>Books every request before its "Book by" date, marks when a carrier says no, and types in real spot quotes so every price tag is current.</td></tr>
         <tr><th>Live Hub</th><td>Everyone sees the same requests and totals as they happen.</td></tr>
         <tr><th>Carriers</th><td>Get a 4-week look ahead so they can hold trucks for Ball.</td></tr>
       </tbody></table>
@@ -888,7 +912,7 @@ function howView() {
         <p>Ball's case workbook (Detail sheet), Findlay plant, January–July 2026, with short yard moves (shuttles) left out.
         Contract and spot prices are each lane's 2026 averages. When Logistics gets a real quote from a spot carrier, they type it in and every price tag uses it instead.
         Three rules (assumptions): (1) "Contract trucks a week" is how many loads contract carriers actually took on that lane in 2026, divided by 30 weeks; Ball's real carrier contracts would replace it.
-        (2) Contract trucks go first come, first served within each Sunday–Saturday week. (3) Less than ${SHORT_NOTICE_DAYS} days' notice goes on spot, because contract carriers need time (Ball's own plan: tender 3–5 days ahead).</p>
+        (2) Contract trucks go first come, first served within each Sunday–Saturday week. (3) Less than ${SHORT_NOTICE_DAYS} days' notice goes on spot, because contract carriers need time (Ball's own plan: tender 3–5 days ahead). The same goes for a request Logistics hasn't booked by ${SHORT_NOTICE_DAYS} days before it ships.</p>
       </details>
 
       <a class="cta" href="./">Try it: pick a team</a>
