@@ -582,7 +582,9 @@ function logisticsView(store, state) {
       <h1>Book the trucks</h1>
       <p class="lede">Every team's requests land here with their contract / spot split already worked out from each lane's contract trucks for that week. Confirm the booking, or mark it if the contract carrier says no. <a href="?role=how">How it works</a></p>
       <a class="guide-link" href="#quote"><strong>Got a spot quote?</strong> Enter it so every team sees the real price ↓</a>
+      <h2 id="todo-title" class="sub-h">Needs a decision</h2>
       <div id="incoming" class="cards"></div>
+      <div id="done"></div>
     </section>
     <section class="panel" id="quote">
       <h2>Got a spot quote? Enter it here</h2>
@@ -635,7 +637,9 @@ function logisticsView(store, state) {
     }
   }
 
+  let doneOpen = false; // keep the Done list open or closed across live updates
   function mount() {
+    $("#app").addEventListener("toggle", (e) => { if (e.target.id === "done-box") doneOpen = e.target.open; }, true);
     $("#q-lane").addEventListener("change", fillQuote);
     $("#q-save").addEventListener("click", () => saveQuote(false));
     $("#q-clear").addEventListener("click", () => saveQuote(true));
@@ -660,18 +664,34 @@ function logisticsView(store, state) {
   function live(rows) {
     paintHint();
     const alloc = allocate(rows);
-    const order = { new: 0, spot: 1, contract: 2 };
-    const sorted = [...rows].sort((a, b) => order[a.status] - order[b.status]);
-    $("#incoming").innerHTML = sorted.length
-      ? sorted.map((r) => {
+    // Oldest first: that's also the order contract trucks are handed out.
+    const byShip = (a, b) => (shipDateOf(a) < shipDateOf(b) ? -1 : shipDateOf(a) > shipDateOf(b) ? 1 : 0);
+    const todo = rows.filter((r) => r.status === "new").sort(byShip);
+    const done = rows.filter((r) => r.status !== "new").sort(byShip);
+    $("#todo-title").textContent = todo.length ? `Needs a decision (${todo.length})` : "Needs a decision";
+    $("#incoming").innerHTML = todo.length
+      ? todo.map((r) => {
           const a = alloc.get(r.id);
           return card(r, a, `${a ? `<p class="room">${roomLine(a)}</p>` : ""}<div class="card-actions">
-          <button type="button" class="util${r.status === "contract" ? " on" : ""}" data-status="contract" data-id="${esc(r.id)}">Confirm booking</button>
-          <button type="button" class="util${r.status === "spot" ? " on" : ""}" data-status="spot" data-id="${esc(r.id)}">Carrier said no → spot</button>
-          ${r.status !== "new" ? `<button type="button" class="util" data-status="new" data-id="${esc(r.id)}">Undo</button>` : ""}
+          <button type="button" class="util" data-status="contract" data-id="${esc(r.id)}">Confirm booking</button>
+          <button type="button" class="util" data-status="spot" data-id="${esc(r.id)}">Carrier said no → spot</button>
         </div>`);
         }).join("")
-      : `<p class="empty">No requests yet. They'll appear here the moment another team sends one.</p>`;
+      : `<p class="empty">${rows.length ? "All caught up. Every request has a decision." : "No requests yet. They'll appear here the moment another team sends one."}</p>`;
+    $("#done").innerHTML = done.length ? `<details id="done-box" class="done-box"${doneOpen ? " open" : ""}>
+        <summary>Done (${done.length}): booked or carrier said no</summary>
+        <ul class="done-list">${done.map((r) => {
+          const a = alloc.get(r.id);
+          return `<li>
+            <span class="status status-${esc(r.status)}">${esc(STATUS[r.status])}</span>
+            <span class="done-what"><strong>Findlay → ${esc(r.destination)}</strong>
+              <span class="kind">${esc((TEAMS[r.team] || {}).name || r.team)} · ${esc(r.loads)} trucks · ships ${esc(fmtDate(shipDateOf(r)))}</span></span>
+            <span class="done-split">${a ? splitChips(a) : ""}</span>
+            <span class="done-money">${money(a ? a.perTruck : r.profit_per_truck)}<span class="kind">per truck</span></span>
+            <button type="button" class="util" data-status="new" data-id="${esc(r.id)}">Undo</button>
+          </li>`;
+        }).join("")}</ul>
+      </details>` : "";
   }
 
   return { html, mount, live };
