@@ -14,15 +14,12 @@ One price tag every team sees before they decide. Sales, Production, Inventory P
 | Carrier view | `./?role=carrier` |
 
 ## The price tag
-- **Profit per truck** = $3,100 − extra trucking cost.
-- **Customer order:** extra trucking cost = spot chance × the lane's spot premium.
-- **Transfer (prebuild or inventory move):** extra trucking cost = the lane's contract cost + spot chance × spot premium.
-- **Spot chance:**
-  - A ship date less than 7 days away assumes a spot truck (short notice).
-  - 7+ days out uses the lane's 2026 spot share.
-- **Spot price:** the lane's 2026 average, until Logistics types in a real quote for that lane. A quote updates every team's price tag live.
-- **Colors:** green ≥ $2,000, yellow $1,000–$1,999, red < $1,000. These thresholds are illustrative; finance would set the real ones.
-- **About the $3,100:** it's Ball's average operating profit per truckload of cans (FY2025 North & Central America comparable operating earnings ÷ cans sold × ~200k cans per truck). It's an average, not contribution margin.
+- **Contract room decides the split.** Each lane's contract carrier takes about `contract_per_week` trucks a week (2026 contract loads ÷ 30 weeks, a stand-in for Ball's real commitments). Requests claim those trucks first come, first served within each Sunday–Saturday week; the rest go on spot.
+- **Under 3 days' notice is all spot**, and so is a request Logistics marks "carrier said no" (its contract trucks pass to the next request in line).
+- **Money (same on every screen):** Making = $3,100 × trucks. Extra trucking = for a customer order, the spot premium on each spot truck (a contract truck is already in the $3,100); for a transfer, the whole move at the contract or spot price. Profit left = Making − extra trucking.
+- **Spot price:** the lane's 2026 average, until Logistics types in a real quote.
+- **Colors (profit per truck):** green ≥ $2,000, yellow $1,000–$1,999, red < $1,000. Illustrative; finance would set the real ones.
+- **About the $3,100:** Ball's average operating profit per truckload of cans (FY2025 North & Central America comparable operating earnings ÷ cans sold × ~200k cans per truck). An average, not contribution margin.
 
 Lane numbers come from `lanes.js`, which `scripts/build_lanes.py` builds from the case workbook.
 - It uses the Detail sheet: 2026 Jan–Jul, shuttles excluded, spot = SM Volume.

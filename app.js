@@ -1,21 +1,24 @@
 import { LANES } from "./lanes.js";
 import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 
-// ---------- The price tag (same math on every screen) ----------
-// Profit per truck = $3,100 average profit per truckload of cans
-//   − extra trucking: spot chance × the lane's spot premium,
-//     plus the move's own contract cost when it is a transfer (an extra truck move).
-// Under 7 days' notice assumes a spot truck; 7+ days uses the lane's 2026 spot share.
+// ---------- The price tag (same engine on every screen) ----------
+// Each lane's contract carrier takes about `contract_per_week` trucks a week (lanes.js).
+// Requests claim those contract trucks first come, first served, within the Sun–Sat week
+// they ship. Whatever doesn't fit goes on spot. Under 3 days' notice is all spot, and so
+// is a request where Logistics marked "carrier said no".
+// Money: Making = $3,100 × trucks. Extra trucking = for a customer order, the spot premium
+// on each spot truck (a contract truck is already in the $3,100); for a transfer, the whole
+// move (contract price, or spot price on spot). Profit left = Making − extra trucking.
 const PROFIT_PER_TRUCK = 3100;
 const GREEN_AT = 2000;
 const YELLOW_AT = 1000;
-const SHORT_NOTICE_DAYS = 7;
+const SHORT_NOTICE_DAYS = 3;
 const VERDICT = {
   green: "Go: good business",
   yellow: "Talk to Logistics first",
   red: "Rethink: change the timing or the place",
 };
-const STATUS = { new: "Waiting on Logistics", contract: "Booked on contract", spot: "Needs spot truck" };
+const STATUS = { new: "Waiting on Logistics", contract: "Booked", spot: "Carrier said no: all spot" };
 
 const TEAMS = {
   sales: {
@@ -44,6 +47,7 @@ const TEAMS = {
 let QUOTES = new Map();
 const laneKey = (l) => `${l.kind}|${l.destination}`;
 const avgSpot = (l) => l.contract_cost + l.spot_premium;
+const colorFor = (perTruck) => (perTruck >= GREEN_AT ? "green" : perTruck >= YELLOW_AT ? "yellow" : "red");
 
 function baseLane(kind, destination) {
   return LANES.find((l) => l.kind === kind && l.destination === destination);
@@ -56,31 +60,82 @@ function laneFor(kind, destination) {
   return { ...lane, quote: q.quote, spot_premium: Math.max(0, q.quote - lane.contract_cost) };
 }
 
-function price(lane, noticeDays) {
-  const spot_chance = noticeDays < SHORT_NOTICE_DAYS ? 1 : Math.round(lane.spot_share * 100) / 100;
-  const base = lane.kind === "transfer" ? lane.contract_cost : 0;
-  const spot_risk = Math.round(spot_chance * lane.spot_premium);
-  const extra_cost = base + spot_risk;
-  const profit_per_truck = PROFIT_PER_TRUCK - extra_cost;
-  const color = profit_per_truck >= GREEN_AT ? "green" : profit_per_truck >= YELLOW_AT ? "yellow" : "red";
-  return { spot_chance, extra_cost, profit_per_truck, color, spot_risk };
+// What a given contract/spot split costs and earns.
+function splitMoney(lane, contract, spot) {
+  const move = lane.kind === "transfer" ? lane.contract_cost : 0;
+  const cEach = move;                     // extra per contract truck
+  const sEach = move + lane.spot_premium; // extra per spot truck
+  const loads = contract + spot;
+  const contractCost = contract * cEach;
+  const spotCost = spot * sEach;
+  const extra = contractCost + spotCost;
+  const making = PROFIT_PER_TRUCK * loads;
+  const profit = making - extra;
+  const perTruck = Math.round(profit / loads);
+  return { cEach, sEach, contractCost, spotCost, extra, making, profit, perTruck, color: colorFor(perTruck) };
 }
 
-// The price fields saved with a request (spot_risk is display-only).
-function priceFields(lane, noticeDays) {
-  const { spot_chance, extra_cost, profit_per_truck, color } = price(lane, noticeDays);
-  return { spot_chance, extra_cost, profit_per_truck, color };
+// Walk every request in the order it was sent and hand out contract trucks.
+// `draft` (optional) is the form being filled in, treated as the newest request.
+function allocate(rows, draft) {
+  const list = [...rows].sort((a, b) =>
+    a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : String(a.id) < String(b.id) ? -1 : 1);
+  if (draft) list.push(draft);
+  const used = new Map();
+  const out = new Map();
+  for (const r of list) {
+    const lane = laneFor(r.kind, r.destination);
+    if (!lane) continue;
+    const week = weekKey(shipDateOf(r));
+    const key = `${laneKey(lane)}|${week}`;
+    const usedBefore = used.get(key) || 0;
+    const cap = lane.contract_per_week;
+    const room = Math.max(0, cap - usedBefore);
+    let contract, reason = null;
+    if (r.status === "spot") { contract = 0; reason = "carrier"; }
+    else if (noticeOf(r) < SHORT_NOTICE_DAYS) { contract = 0; reason = "notice"; }
+    else { contract = Math.min(r.loads, room); if (contract < r.loads) reason = "full"; }
+    used.set(key, usedBefore + contract);
+    out.set(r.id, { lane, week, cap, usedBefore, room, contract, spot: r.loads - contract, reason, notice: noticeOf(r),
+      ...splitMoney(lane, contract, r.loads - contract) });
+  }
+  return out;
 }
 
-// Once Logistics books a request, the estimate becomes the actual cost:
-// contract = no spot truck; spot = a spot truck at today's spot price.
-function finalFields(lane, status) {
-  const base = lane.kind === "transfer" ? lane.contract_cost : 0;
-  const extra_cost = status === "spot" ? base + lane.spot_premium : base;
-  const profit_per_truck = PROFIT_PER_TRUCK - extra_cost;
-  const color = profit_per_truck >= GREEN_AT ? "green" : profit_per_truck >= YELLOW_AT ? "yellow" : "red";
-  return { spot_chance: status === "spot" ? 1 : 0, extra_cost, profit_per_truck, color };
+function reasonText(a) {
+  if (a.reason === "carrier") return "Carrier said no, so all spot";
+  if (a.reason === "notice") return `Only ${noticeText(a.notice)}: contract carriers need ${SHORT_NOTICE_DAYS}+ days, so all spot`;
+  if (a.reason === "full") return a.contract
+    ? `Contract full: only ${a.room} of ~${a.cap} contract trucks were left that week`
+    : `Contract full: all ~${a.cap} contract trucks that week were already taken`;
+  return "All on contract";
 }
+
+// The earliest date in the next 4 weeks (3+ days out) that puts more of this request on contract.
+// `rows` should already hold the request in its current spot (draft or saved row).
+function betterDate(rows, r, current, draft) {
+  const t0 = today();
+  const day = atNoon(shipDateOf(r)).getDay();
+  for (let w = 0; w <= 4; w++) {
+    let date = addDays(weekKey(t0), w * 7 + day);
+    if (daysBetween(t0, date) < SHORT_NOTICE_DAYS) date = addDays(t0, SHORT_NOTICE_DAYS);
+    if (weekKey(date) !== addDays(weekKey(t0), w * 7) || weekKey(date) === current.week) continue;
+    const moved = { ...r, ship_date: date, notice_days: daysBetween(t0, date) };
+    const res = draft
+      ? allocate(rows, moved).get(moved.id)
+      : allocate(rows.map((x) => (x.id === r.id ? moved : x))).get(r.id);
+    if (res && res.profit > current.profit) return { date, res, save: res.profit - current.profit };
+  }
+  return null;
+}
+
+// Fields saved with a request (the database requires them; screens use allocate()).
+const savedFields = (a, loads) => ({
+  spot_chance: Math.round((a.spot / loads) * 100) / 100,
+  extra_cost: Math.round(a.extra / loads),
+  profit_per_truck: a.perTruck,
+  color: a.color,
+});
 
 // ---------- Data store: Supabase when configured, this browser otherwise ----------
 async function makeStore() {
@@ -164,21 +219,12 @@ const noticeText = (n) => (n === 0 ? "same-day notice" : n === 1 ? "1 day's noti
 // Rows sent before ship dates existed only have a week number.
 const shipDateOf = (r) => r.ship_date || addDays(isoDate(new Date(r.created_at)), (r.week ?? 0) * 7);
 const noticeOf = (r) => r.notice_days ?? (r.week ? r.week * 7 : 0);
-// 7-day buckets counted from today: 0 = the next 7 days.
-const weekIndex = (r) => Math.floor(daysBetween(today(), shipDateOf(r)) / 7);
-const weekLabel = (i) => {
-  const a = addDays(today(), i * 7), b = addDays(today(), i * 7 + 6);
-  return atNoon(a).getMonth() === atNoon(b).getMonth() ? `${fmtShort(a)}–${atNoon(b).getDate()}` : `${fmtShort(a)}–${fmtShort(b)}`;
+// Weeks run Sunday to Saturday, the same weeks the calendar shows.
+const weekKey = (iso) => addDays(iso, -atNoon(iso).getDay());
+const weekLabel = (sun) => {
+  const sat = addDays(sun, 6);
+  return atNoon(sun).getMonth() === atNoon(sat).getMonth() ? `${fmtShort(sun)}–${atNoon(sat).getDate()}` : `${fmtShort(sun)}–${fmtShort(sat)}`;
 };
-
-// Contract trucks still open on a lane in a week, after what Logistics already booked.
-function contractRoom(lane, week, rows, excludeId) {
-  const booked = rows
-    .filter((x) => x.status === "contract" && x.id !== excludeId && x.kind === lane.kind &&
-      x.destination === lane.destination && weekIndex(x) === week)
-    .reduce((n, x) => n + x.loads, 0);
-  return { cap: lane.contract_per_week, booked, room: Math.max(0, lane.contract_per_week - booked) };
-}
 
 function toast(msg, bad = false) {
   const t = document.createElement("div");
@@ -189,141 +235,152 @@ function toast(msg, bad = false) {
 }
 
 // ---------- Shared pieces ----------
-function priceTag(lane, notice, loads, team) {
-  const p = price(lane, notice);
-  const lines = [];
-  if (lane.kind === "transfer") lines.push(`Truck to move the cans (contract price): ${money(lane.contract_cost)}`);
-  lines.push(notice < SHORT_NOTICE_DAYS
-    ? `Only ${noticeText(notice)}, too late to book a contract truck, so we count a spot truck: +${money(lane.spot_premium)}`
-    : `${pct(lane.spot_share)} of trucks on this lane end up spot, at ${money(lane.spot_premium)} extra each: +${money(p.spot_risk)}`);
-  lines.push(`${loads} loads × ${money(p.extra_cost)} = ${money(p.extra_cost * loads)} extra trucking`);
-  const source = lane.quote != null
-    ? `<p class="source-line quoted">Spot price ${money(lane.quote)}: <strong>today's quote from Logistics</strong> (2026 average ${money(avgSpot(baseLane(lane.kind, lane.destination)))})</p>`
-    : `<p class="source-line">Spot price ${money(avgSpot(lane))}: 2026 average. Logistics can update it with a real quote.</p>`;
-  let nudge = "";
-  if (notice < SHORT_NOTICE_DAYS) {
-    const laterDate = addDays(today(), SHORT_NOTICE_DAYS);
-    const later = price(lane, SHORT_NOTICE_DAYS);
-    const save = (later.profit_per_truck - p.profit_per_truck) * loads;
-    if (save > 0) {
-      nudge = `<div class="nudge">
-        <p><strong>${TEAMS[team].nudge} ${fmtDate(laterDate)} instead:</strong> ${money(later.profit_per_truck)} per truck.
-        Saves ${money(save)} on ${loads} loads.</p>
-        <button type="button" class="util" data-use-date="${laterDate}">Use ${fmtDate(laterDate)}</button>
-      </div>`;
-    }
-  }
-  return `<div class="tag tag-${p.color}">
-    <p class="verdict"><span class="dot"></span>${VERDICT[p.color]}</p>
-    <p class="big">${money(p.profit_per_truck)}<small>profit per truck</small></p>
-    <p class="math">${money(PROFIT_PER_TRUCK)} profit − ${money(p.extra_cost)} extra trucking</p>
-    <ul class="why">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>
+const splitChips = (a) =>
+  `${a.contract ? `<span class="b b-contract">${a.contract}</span> on contract ` : ""}${a.spot ? `<span class="b b-spot">${a.spot}</span> on spot` : ""}`;
+
+// The money box: Making − Extra trucking = Profit left. Same on every screen.
+function moneyBox(a) {
+  const order = a.lane.kind === "order";
+  const rows = [];
+  if (a.contract) rows.push([`${a.contract} contract truck${a.contract === 1 ? "" : "s"}`,
+    order ? "already in the $3,100" : `× ${money(a.cEach)}`, money(a.contractCost)]);
+  if (a.spot) rows.push([`${a.spot} spot truck${a.spot === 1 ? "" : "s"}`,
+    order ? `× ${money(a.sEach)} more than contract` : `× ${money(a.sEach)}`, money(a.spotCost)]);
+  const loads = a.contract + a.spot;
+  return `<table class="moneybox"><tbody>
+    <tr class="mb-make"><th>Making</th><td>${loads} trucks × ${money(PROFIT_PER_TRUCK)}</td><td>${money(a.making)}</td></tr>
+    ${rows.map(([what, how, amt]) => `<tr><th>− ${what}</th><td>${how}</td><td>${amt}</td></tr>`).join("")}
+    <tr class="mb-left"><th>Profit left</th><td>${money(a.perTruck)} per truck</td><td>${money(a.profit)}</td></tr>
+  </tbody></table>`;
+}
+
+function roomLine(a) {
+  return `Week of ${weekLabel(a.week)} · contract carrier takes ~${a.cap} a week · ${a.usedBefore} already taken · <strong>${a.room} open</strong>`;
+}
+
+function priceTag(a, nudge, team) {
+  const source = a.lane.quote != null
+    ? `<p class="source-line quoted">Spot price ${money(a.lane.quote)}: <strong>today's quote from Logistics</strong> (2026 average ${money(avgSpot(baseLane(a.lane.kind, a.lane.destination)))})</p>`
+    : `<p class="source-line">Spot price ${money(avgSpot(a.lane))}: 2026 average. Contract price ${money(a.lane.contract_cost)}.</p>`;
+  const tip = nudge ? `<div class="nudge">
+      <p><strong>${TEAMS[team].nudge} ${fmtDate(nudge.date)} instead:</strong> ${nudge.res.contract} on contract, ${nudge.res.spot} on spot,
+      ${money(nudge.res.perTruck)} per truck. <strong>Saves ${money(nudge.save)}.</strong></p>
+      <button type="button" class="util" data-use-date="${nudge.date}">Use ${fmtDate(nudge.date)}</button>
+    </div>` : "";
+  return `<div class="tag tag-${a.color}">
+    <p class="verdict"><span class="dot"></span>${VERDICT[a.color]}</p>
+    <p class="big">${money(a.perTruck)}<small>profit per truck</small></p>
+    <p class="split-line">${splitChips(a)}</p>
+    <p class="reason">${reasonText(a)}</p>
+    <p class="room">${roomLine(a)}</p>
+    ${moneyBox(a)}
     ${source}
     <a class="how-link" href="?role=how#example">How is this figured?</a>
-    ${nudge}
+    ${tip}
   </div>`;
 }
 
-function card(r, actions = "") {
+function card(r, a, actions = "") {
   const t = TEAMS[r.team] || { name: r.team, type: r.kind };
   const flex = r.flex === "outside" ? `<span class="flag">Outside customer's forecast</span>` : "";
-  return `<article class="card card-${esc(r.color)}" data-id="${esc(r.id)}">
+  const color = a ? a.color : r.color;
+  return `<article class="card card-${esc(color)}" data-id="${esc(r.id)}">
     <div class="card-head">
       <span class="pill">${esc(t.name)}</span>
       <span class="status status-${esc(r.status)}">${esc(STATUS[r.status] || r.status)}</span>
       <time>${esc(time(r.created_at))}</time>
     </div>
     <h3>${esc(t.type)}: Findlay → ${esc(r.destination)}</h3>
-    <p class="meta">${esc(r.loads)} loads · Ships ${esc(fmtDate(shipDateOf(r)))} (${esc(noticeText(noticeOf(r)))}) ${flex}</p>
-    <p class="card-money"><strong>${money(r.profit_per_truck)}</strong> profit / truck
-      <span class="est">${r.status === "new" ? "estimate" : "final"}</span>
-      <span class="verdict-sm"><span class="dot"></span>${esc(VERDICT[r.color] || "")}</span></p>
+    <p class="meta">${esc(r.loads)} trucks · Ships ${esc(fmtDate(shipDateOf(r)))} (${esc(noticeText(noticeOf(r)))}) ${flex}</p>
+    ${a ? `<p class="split-line">${splitChips(a)} <span class="reason-sm">${a.reason ? esc(reasonText(a)) : ""}</span></p>` : ""}
+    <p class="card-money"><strong>${money(a ? a.perTruck : r.profit_per_truck)}</strong> profit / truck
+      ${a ? `<span class="card-left">· ${money(a.profit)} left after ${money(a.extra)} extra trucking</span>` : ""}
+      <span class="verdict-sm"><span class="dot"></span>${esc(VERDICT[color] || "")}</span></p>
     ${actions}
   </article>`;
 }
 
-// Trucks per lane per week, split by what Logistics has done with them.
+// Trucks per lane per calendar week, split contract / spot.
 function scheduleTable(rows) {
+  const alloc = allocate(rows);
+  const first = weekKey(today());
+  const weeks = [0, 1, 2, 3].map((i) => addDays(first, i * 7));
   const grid = new Map();
   let anyLater = false;
   for (const r of rows) {
-    const w = weekIndex(r);
-    if (w < 0) continue; // already shipped
-    const col = Math.min(4, w);
-    if (col === 4) anyLater = true;
+    const a = alloc.get(r.id);
+    if (!a || a.week < first) continue; // already shipped
+    let col = weeks.indexOf(a.week);
+    if (col < 0) { col = 4; anyLater = true; }
     const key = `${r.kind}|${r.destination}`;
-    if (!grid.has(key)) grid.set(key, Array.from({ length: 5 }, () => ({ contract: 0, spot: 0, new: 0 })));
-    grid.get(key)[col][r.status] += r.loads;
+    if (!grid.has(key)) grid.set(key, Array.from({ length: 5 }, () => ({ contract: 0, spot: 0 })));
+    grid.get(key)[col].contract += a.contract;
+    grid.get(key)[col].spot += a.spot;
   }
   if (!grid.size) return `<p class="empty">No trucks planned yet. Send a request to fill this in.</p>`;
   const cols = anyLater ? 5 : 4;
-  const totals = Array.from({ length: 5 }, () => ({ contract: 0, spot: 0, new: 0 }));
-  const all = (c) => c.contract + c.spot + c.new;
-  const chips = (c) => all(c)
-    ? ["contract", "spot", "new"].filter((k) => c[k]).map((k) => `<span class="b b-${k}">${c[k]}</span>`).join("")
+  const totals = Array.from({ length: 5 }, () => ({ contract: 0, spot: 0 }));
+  const sum = (w) => w.reduce((n, c) => n + c.contract + c.spot, 0);
+  const chips = (c) => c.contract + c.spot
+    ? `${c.contract ? `<span class="b b-contract">${c.contract}</span>` : ""}${c.spot ? `<span class="b b-spot">${c.spot}</span>` : ""}`
     : "·";
-  let anyOver = false;
   const body = [...grid.entries()]
-    .sort((a, b) => b[1].reduce((n, c) => n + all(c), 0) - a[1].reduce((n, c) => n + all(c), 0))
-    .map(([key, weeks]) => {
+    .sort((a, b) => sum(b[1]) - sum(a[1]))
+    .map(([key, cells]) => {
       const [kind, dest] = key.split("|");
       const lane = baseLane(kind, dest);
-      const cells = weeks.slice(0, cols).map((c, i) => {
-        ["contract", "spot", "new"].forEach((k) => (totals[i][k] += c[k]));
-        const over = i < 4 && lane && c.contract + c.new > lane.contract_per_week;
-        if (over) anyOver = true;
-        return `<td class="${over ? "over" : ""}">${chips(c)}${over ? `<span class="warn" title="More than the contract carrier usually takes">⚠</span>` : ""}</td>`;
+      const tds = cells.slice(0, cols).map((c, i) => {
+        totals[i].contract += c.contract;
+        totals[i].spot += c.spot;
+        return `<td>${chips(c)}</td>`;
       }).join("");
-      return `<tr><th scope="row">Findlay → ${esc(dest)} <span class="kind">${kind === "order" ? "Customer" : "Transfer"} · contract takes ~${lane ? lane.contract_per_week : "?"}/week</span></th>${cells}</tr>`;
+      return `<tr><th scope="row">Findlay → ${esc(dest)} <span class="kind">${kind === "order" ? "Customer" : "Transfer"} · contract takes ~${lane ? lane.contract_per_week : "?"}/week</span></th>${tds}</tr>`;
     })
     .join("");
-  return `<p class="legend"><span class="b b-contract">n</span> on contract <span class="b b-spot">n</span> on spot <span class="b b-new">n</span> waiting on Logistics</p>
+  return `<p class="legend"><span class="b b-contract">n</span> on contract <span class="b b-spot">n</span> on spot</p>
   <div class="table-wrap"><table class="outlook">
-    <thead><tr><th>Lane</th>${[0, 1, 2, 3].map((i) => `<th>${weekLabel(i)}</th>`).join("")}${anyLater ? "<th>Later</th>" : ""}</tr></thead>
+    <thead><tr><th>Lane</th>${weeks.map((w) => `<th>${weekLabel(w)}</th>`).join("")}${anyLater ? "<th>Later</th>" : ""}</tr></thead>
     <tbody>${body}</tbody>
     <tfoot><tr><th>Total trucks</th>${totals.slice(0, cols).map((c) => `<td>${chips(c)}</td>`).join("")}</tr></tfoot>
-  </table></div>
-  ${anyOver ? `<p class="small"><span class="warn">⚠</span> More trucks than that lane's contract carrier usually takes in a week. The extra ones will probably need spot trucks unless Logistics lines up more contract capacity.</p>` : ""}`;
+  </table></div>`;
 }
 
 // Calendar of trucks going out: 4 weeks (Sun–Sat) from the current week.
-// Each day is one stacked bar: contract at the bottom, then spot, then waiting.
+// Each day is one stacked bar: contract at the bottom, spot on top.
 const CAL_BAR_PX = 72;
-const STATUS_ORDER = ["contract", "spot", "new"];
-const STATUS_SHORT = { contract: "contract", spot: "spot", new: "waiting" };
 
 function calendarPanel(rows, selected) {
+  const alloc = allocate(rows);
   const t0 = today();
-  const start = addDays(t0, -atNoon(t0).getDay()); // Sunday on or before today
+  const start = weekKey(t0);
   const end = addDays(start, 27);
   const byDay = new Map();
   let after = 0;
   for (const r of rows) {
+    const a = alloc.get(r.id);
     const d = shipDateOf(r);
     if (d > end) { after += r.loads; continue; }
-    if (d < start) continue;
-    if (!byDay.has(d)) byDay.set(d, { contract: 0, spot: 0, new: 0, rows: [] });
+    if (d < start || !a) continue;
+    if (!byDay.has(d)) byDay.set(d, { contract: 0, spot: 0, waiting: 0, rows: [] });
     const day = byDay.get(d);
-    day[r.status] += r.loads;
+    day.contract += a.contract;
+    day.spot += a.spot;
+    if (r.status === "new") day.waiting += r.loads;
     day.rows.push(r);
   }
-  const total = (c) => c.contract + c.spot + c.new;
+  const total = (c) => c.contract + c.spot;
   const max = Math.max(1, ...[...byDay.values()].map(total));
-  const split = (c) => STATUS_ORDER.map((k) => `${c[k]} ${STATUS_SHORT[k]}`).join(" · ");
-
-  const bar = (c) => {
-    const segs = STATUS_ORDER.filter((k) => c[k]).map((k) =>
-      `<span class="seg seg-${k}" style="height:${Math.max(3, Math.round((c[k] / max) * CAL_BAR_PX))}px"></span>`);
-    return `<span class="cal-bar">${segs.join("")}</span>`;
-  };
+  const split = (c) => `${c.contract} contract · ${c.spot} spot`;
+  const bar = (c) => `<span class="cal-bar">${["contract", "spot"].filter((k) => c[k]).map((k) =>
+    `<span class="seg seg-${k}" style="height:${Math.max(3, Math.round((c[k] / max) * CAL_BAR_PX))}px"></span>`).join("")}</span>`;
 
   let html = `<div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => `<div class="cal-head">${d}</div>`).join("")}<div class="cal-head">Week total</div>`;
   for (let w = 0; w < 4; w++) {
-    const wk = { contract: 0, spot: 0, new: 0 };
+    const wk = { contract: 0, spot: 0, waiting: 0 };
     for (let i = 0; i < 7; i++) {
       const d = addDays(start, w * 7 + i);
       const c = byDay.get(d);
-      if (c) STATUS_ORDER.forEach((k) => (wk[k] += c[k]));
+      if (c) ["contract", "spot", "waiting"].forEach((k) => (wk[k] += c[k]));
       const cls = ["cal-day", d === t0 ? "cal-today" : "", d < t0 ? "cal-past" : "", d === selected ? "cal-selected" : "", c ? "has" : ""].join(" ");
       const label = atNoon(d).getDate() === 1 || (w === 0 && i === 0) ? fmtShort(d) : atNoon(d).getDate();
       html += `<button type="button" class="${cls}" data-day="${d}" ${c ? `data-tip="${esc(fmtDate(d))}: ${total(c)} trucks (${split(c)})"` : "disabled"}>
@@ -333,17 +390,19 @@ function calendarPanel(rows, selected) {
     }
     const n = total(wk);
     html += `<div class="cal-week">${n ? `<span class="cal-week-n">${n}</span>
-      <span class="cal-hbar">${STATUS_ORDER.filter((k) => wk[k]).map((k) => `<span class="seg seg-${k}" style="flex:${wk[k]}"></span>`).join("")}</span>
-      <span class="cal-week-split">${split(wk)}</span>` : `<span class="cal-empty">·</span>`}</div>`;
+      <span class="cal-hbar">${["contract", "spot"].filter((k) => wk[k]).map((k) => `<span class="seg seg-${k}" style="flex:${wk[k]}"></span>`).join("")}</span>
+      <span class="cal-week-split">${split(wk)}${wk.waiting ? `<br>${wk.waiting} trucks waiting on Logistics` : ""}</span>` : `<span class="cal-empty">·</span>`}</div>`;
   }
   html += `</div>`;
 
   if (selected && byDay.has(selected)) {
     const day = byDay.get(selected);
     html += `<div class="cal-detail"><h3>${esc(fmtDate(selected))}: ${total(day)} trucks</h3><ul>
-      ${day.rows.map((r) => `<li><span class="b b-${esc(r.status)}">${esc(r.loads)}</span>
-        <strong>Findlay → ${esc(r.destination)}</strong> · ${esc(STATUS[r.status])} · ${esc((TEAMS[r.team] || {}).name || r.team)}
-        · ${money(r.profit_per_truck)} profit / truck</li>`).join("")}
+      ${day.rows.map((r) => {
+        const a = alloc.get(r.id);
+        return `<li>${splitChips(a)} · <strong>Findlay → ${esc(r.destination)}</strong> · ${esc((TEAMS[r.team] || {}).name || r.team)}
+          · ${esc(STATUS[r.status])} · ${money(a.perTruck)} profit / truck</li>`;
+      }).join("")}
     </ul></div>`;
   } else {
     html += `<p class="small">Click a day to see which lanes ship that day.</p>`;
@@ -392,13 +451,13 @@ function homeView() {
 function requestView(team, store, state) {
   const t = TEAMS[team];
   const lanes = LANES.filter((l) => l.kind === t.kind);
-  const form = { destination: lanes[0].destination, loads: 10, shipDate: addDays(today(), 2), flex: "inside" };
+  const form = { destination: lanes[0].destination, loads: 10, shipDate: addDays(today(), 5), flex: "inside" };
   const notice = () => daysBetween(today(), form.shipDate);
 
   const html = `<section class="panel">
       <p class="eyebrow">${t.name}</p>
       <h1>${t.ask}</h1>
-      <p class="lede">Pick where, how many and the ship date. The price tag shows what Ball keeps after trucking. Then send it to the hub.</p>
+      <p class="lede">Pick where, how many and the ship date. You'll see right away how many trucks fit on the lane's contract that week, how many go on spot, and what Ball keeps. Then send it to the hub.</p>
       <p class="from">Ships from <strong>Ball's Findlay, OH plant</strong> (the pilot plant)</p>
       <label class="field"><span class="label">${t.dest}</span>
         <select id="dest">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select>
@@ -426,15 +485,22 @@ function requestView(team, store, state) {
       <div id="mine" class="cards"></div>
     </section>`;
 
+  const draftRow = () => ({
+    id: "draft", created_at: "\uffff", team, kind: t.kind, destination: form.destination, loads: form.loads,
+    ship_date: form.shipDate, notice_days: notice(), status: "new",
+  });
+  const draftAlloc = () => allocate(state.rows, draftRow()).get("draft");
+
   function paint() {
-    const lane = laneFor(t.kind, form.destination);
     $("#loads").textContent = form.loads;
     document.querySelectorAll("#flex button").forEach((b) => b.classList.toggle("on", b.dataset.flex === form.flex));
     if (!form.shipDate || form.shipDate < today()) form.shipDate = today();
     $("#ship").value = form.shipDate;
     const n = notice();
-    $("#notice-line").innerHTML = `${fmtDate(form.shipDate)} · <strong>${noticeText(n)}</strong>${n < SHORT_NOTICE_DAYS ? " (short notice)" : ""}`;
-    $("#tag").innerHTML = priceTag(lane, n, form.loads, team);
+    $("#notice-line").innerHTML = `${fmtDate(form.shipDate)} · <strong>${noticeText(n)}</strong>${n < SHORT_NOTICE_DAYS ? ` (under ${SHORT_NOTICE_DAYS} days: spot only)` : ""}`;
+    const a = draftAlloc();
+    const better = a.spot ? betterDate(state.rows, draftRow(), a, true) : null;
+    $("#tag").innerHTML = priceTag(a, better, team);
   }
 
   function mount() {
@@ -456,11 +522,10 @@ function requestView(team, store, state) {
   }
 
   async function send(btn) {
-    const lane = laneFor(t.kind, form.destination);
     const row = {
       team, kind: t.kind, destination: form.destination, loads: form.loads,
       ship_date: form.shipDate, notice_days: notice(),
-      flex: team === "sales" ? form.flex : null, ...priceFields(lane, notice()),
+      flex: team === "sales" ? form.flex : null, ...savedFields(draftAlloc(), form.loads),
     };
     btn.disabled = true;
     try {
@@ -476,12 +541,13 @@ function requestView(team, store, state) {
 
   async function moveLater(btn) {
     const r = state.rows.find((x) => String(x.id) === btn.dataset.move);
-    const lane = r && laneFor(r.kind, r.destination);
-    if (!lane) return;
+    const date = btn.dataset.date;
+    if (!r || !date) return;
     btn.disabled = true;
     try {
-      const date = addDays(today(), SHORT_NOTICE_DAYS);
-      await store.update(r.id, { ship_date: date, notice_days: SHORT_NOTICE_DAYS, ...priceFields(lane, SHORT_NOTICE_DAYS) });
+      const notice_days = daysBetween(today(), date);
+      const moved = allocate(state.rows.map((x) => (x.id === r.id ? { ...x, ship_date: date, notice_days } : x))).get(r.id);
+      await store.update(r.id, { ship_date: date, notice_days, ...savedFields(moved, r.loads) });
       toast(`Moved to ${fmtDate(date)}.`);
       state.refresh();
     } catch (err) {
@@ -492,16 +558,17 @@ function requestView(team, store, state) {
 
   function live(rows) {
     paint();
+    const alloc = allocate(rows);
     const mine = rows.filter((r) => r.team === team);
     $("#mine").innerHTML = mine.length
       ? mine.map((r) => {
-          const lane = laneFor(r.kind, r.destination);
+          const a = alloc.get(r.id);
           let action = "";
-          if (lane && noticeOf(r) < SHORT_NOTICE_DAYS && r.status === "new") {
-            const save = (price(lane, SHORT_NOTICE_DAYS).profit_per_truck - price(lane, noticeOf(r)).profit_per_truck) * r.loads;
-            if (save > 0) action = `<div class="card-actions"><button type="button" class="util" data-move="${esc(r.id)}">Move to ${fmtDate(addDays(today(), SHORT_NOTICE_DAYS))} · save ${money(save)}</button></div>`;
+          if (a && a.spot && r.status === "new") {
+            const better = betterDate(rows, r, a, false);
+            if (better) action = `<div class="card-actions"><button type="button" class="util" data-move="${esc(r.id)}" data-date="${better.date}">Move to ${fmtDate(better.date)} · ${better.res.contract} on contract · save ${money(better.save)}</button></div>`;
           }
-          return card(r, action);
+          return card(r, a, action);
         }).join("")
       : `<p class="empty">Nothing sent yet.</p>`;
   }
@@ -513,7 +580,7 @@ function logisticsView(store, state) {
   const html = `<section class="panel">
       <p class="eyebrow">Logistics</p>
       <h1>Book the trucks</h1>
-      <p class="lede">Every team's requests land here. Book a contract truck (cheaper, set in advance) when you can. Mark "Needs spot" when you have to buy a last-minute truck. <a href="?role=how">How it works</a></p>
+      <p class="lede">Every team's requests land here with their contract / spot split already worked out from each lane's contract trucks for that week. Confirm the booking, or mark it if the contract carrier says no. <a href="?role=how">How it works</a></p>
       <a class="guide-link" href="#quote"><strong>Got a spot quote?</strong> Enter it so every team sees the real price ↓</a>
       <div id="incoming" class="cards"></div>
     </section>
@@ -577,15 +644,11 @@ function logisticsView(store, state) {
       const b = e.target.closest("button[data-status]");
       if (!b) return;
       const r = state.rows.find((x) => String(x.id) === b.dataset.id);
-      const lane = r && laneFor(r.kind, r.destination);
-      if (!lane) return;
+      if (!r) return;
       b.disabled = true;
       try {
-        await store.update(r.id, { status: b.dataset.status, ...finalFields(lane, b.dataset.status) });
-        if (b.dataset.status === "contract") {
-          const { room } = contractRoom(lane, weekIndex(r), state.rows, r.id);
-          if (r.loads > room) toast(`Heads up: only ${room} contract trucks were open that week. The carrier may turn some down.`, true);
-        }
+        await store.update(r.id, { status: b.dataset.status });
+        if (b.dataset.status === "spot") toast("Marked all spot. Its contract trucks go to the next request in line.");
         state.refresh();
       } catch (err) {
         toast("Couldn't update: " + err.message, true);
@@ -594,31 +657,20 @@ function logisticsView(store, state) {
     });
   }
 
-  function roomLine(r, rows) {
-    const lane = laneFor(r.kind, r.destination);
-    const w = weekIndex(r);
-    if (!lane || w < 0) return "";
-    const { cap, booked, room } = contractRoom(lane, w, rows, r.id);
-    if (r.status === "spot") return "";
-    if (r.status === "contract") {
-      const total = booked + r.loads;
-      return `<p class="room">Contract on this lane: ~${cap} trucks a week. Week of ${weekLabel(w)}: <strong>${total} of ~${cap} booked</strong>.${total > cap
-        ? ` <span class="warn">⚠ ${total - cap} over</span>: the carrier may turn some down.` : ""}</p>`;
-    }
-    const short = r.loads > room
-      ? ` This request needs ${r.loads}, so about <strong>${r.loads - room} would likely need spot</strong>.` : "";
-    return `<p class="room">Contract on this lane: ~${cap} trucks a week. Week of ${weekLabel(w)}: ${booked} booked, <strong>${room} open</strong>.${short}</p>`;
-  }
-
   function live(rows) {
     paintHint();
+    const alloc = allocate(rows);
     const order = { new: 0, spot: 1, contract: 2 };
     const sorted = [...rows].sort((a, b) => order[a.status] - order[b.status]);
     $("#incoming").innerHTML = sorted.length
-      ? sorted.map((r) => card(r, `${roomLine(r, rows)}<div class="card-actions">
-          <button type="button" class="util${r.status === "contract" ? " on" : ""}" data-status="contract" data-id="${esc(r.id)}">Book contract</button>
-          <button type="button" class="util${r.status === "spot" ? " on" : ""}" data-status="spot" data-id="${esc(r.id)}">Needs spot</button>
-        </div>`)).join("")
+      ? sorted.map((r) => {
+          const a = alloc.get(r.id);
+          return card(r, a, `${a ? `<p class="room">${roomLine(a)}</p>` : ""}<div class="card-actions">
+          <button type="button" class="util${r.status === "contract" ? " on" : ""}" data-status="contract" data-id="${esc(r.id)}">Confirm booking</button>
+          <button type="button" class="util${r.status === "spot" ? " on" : ""}" data-status="spot" data-id="${esc(r.id)}">Carrier said no → spot</button>
+          ${r.status !== "new" ? `<button type="button" class="util" data-status="new" data-id="${esc(r.id)}">Undo</button>` : ""}
+        </div>`);
+        }).join("")
       : `<p class="empty">No requests yet. They'll appear here the moment another team sends one.</p>`;
   }
 
@@ -635,11 +687,11 @@ function hubView(store, state) {
       <div id="totals" class="totals"></div>
       <section class="cal-panel">
         <div class="cal-top"><h2>Trucks going out</h2>
-          <p class="legend"><span class="key key-contract"></span> on contract <span class="key key-spot"></span> on spot <span class="key key-new"></span> waiting on Logistics</p></div>
+          <p class="legend"><span class="key key-contract"></span> on contract <span class="key key-spot"></span> on spot (contract full, short notice or carrier said no)</p></div>
         <div id="calendar"></div>
       </section>
       <div class="hub-grid">
-        <div><h2>Requests</h2><div id="feed" class="cards"></div></div>
+        <div><h2 id="feed-title">Requests</h2><div id="feed" class="cards"></div></div>
         <div><h2>By lane: next 4 weeks</h2><div id="outlook"></div>
           <p class="small">The same numbers become the 4-week outlook we give carriers.</p>
           <details class="contracts-box"><summary>Our contracts by lane</summary><div id="contracts"></div></details></div>
@@ -683,21 +735,24 @@ function hubView(store, state) {
   }
 
   function live(rows) {
-    let profit = 0, extra = 0;
-    const trucks = { contract: 0, spot: 0, new: 0 };
+    const alloc = allocate(rows);
+    const t = { contract: 0, spot: 0, contractCost: 0, spotCost: 0, making: 0, profit: 0 };
+    let waiting = 0;
     for (const r of rows) {
-      profit += r.profit_per_truck * r.loads;
-      extra += r.extra_cost * r.loads;
-      trucks[r.status] += r.loads;
+      const a = alloc.get(r.id);
+      if (!a) continue;
+      for (const k of Object.keys(t)) t[k] += a[k];
+      if (r.status === "new") waiting++;
     }
     const tile = (label, value, sub = "", cls = "") => `<div class="stat ${cls}"><p class="stat-label">${label}</p><p class="stat-value">${value}</p>${sub ? `<p class="stat-sub">${sub}</p>` : ""}</div>`;
     $("#totals").innerHTML =
-      tile("Trucks booked on contract", trucks.contract, "", "stat-contract") +
-      tile("Trucks on spot", trucks.spot, "", "stat-spot") +
-      tile("Trucks waiting on Logistics", trucks.new, "", "stat-new") +
-      tile("Profit left after trucking", money(profit), `after ${money(extra)} extra trucking`);
+      tile("Trucks on contract", t.contract, "within each lane's weekly contract", "stat-contract") +
+      tile("Trucks on spot", t.spot, "contract full, short notice or carrier said no", "stat-spot") +
+      tile("Extra trucking", money(t.contractCost + t.spotCost), `${money(t.contractCost)} contract moves · ${money(t.spotCost)} spot`) +
+      tile("Profit left", money(t.profit), `of ${money(t.making)} made`);
     $("#contracts").innerHTML = contractsTable();
-    $("#feed").innerHTML = rows.length ? rows.map((r) => card(r)).join("") : `<p class="empty">Waiting for the first request…</p>`;
+    $("#feed-title").textContent = waiting ? `Requests (${waiting} waiting on Logistics)` : "Requests";
+    $("#feed").innerHTML = rows.length ? rows.map((r) => card(r, alloc.get(r.id))).join("") : `<p class="empty">Waiting for the first request…</p>`;
     $("#outlook").innerHTML = scheduleTable(rows);
     $("#calendar").innerHTML = calendarPanel(rows, selected);
   }
@@ -716,12 +771,17 @@ function carrierView() {
 }
 
 function howView() {
+  // The example runs through the same engine as the app: Mississauga, ~15 contract trucks a week.
   const lane = baseLane("transfer", "Mississauga, ON");
-  const loads = 10;
-  const now = price(lane, 3);
-  const later = price(lane, SHORT_NOTICE_DAYS);
-  const save = (later.profit_per_truck - now.profit_per_truck) * loads;
-  const tag = (p) => `<span class="mini mini-${p.color}">${money(p.profit_per_truck)} · ${p.color[0].toUpperCase() + p.color.slice(1)}</span>`;
+  const wed = addDays(weekKey(today()), 7 + 3); // Wednesday next week
+  const mk = (id, n, date, loads = 10) => ({ id, created_at: String(n), kind: "transfer", destination: lane.destination,
+    loads, ship_date: date, notice_days: Math.max(daysBetween(today(), date), SHORT_NOTICE_DAYS), status: "new" });
+  const A = mk("a", 1, wed), B = mk("b", 2, wed);
+  const one = allocate([A]).get("a");
+  const two = allocate([A, B]).get("b");
+  const moved = allocate([A, { ...B, ship_date: addDays(wed, 7) }]).get("b");
+  const rush = allocate([{ ...mk("c", 3, addDays(today(), 1), 10), notice_days: 1 }]).get("c");
+  const tag = (a) => `<span class="mini mini-${a.color}">${money(a.perTruck)} per truck · ${a.color[0].toUpperCase() + a.color.slice(1)}</span>`;
   const html = `<section class="panel how">
       <p class="eyebrow">1-minute guide</p>
       <h1>Every truck gets a price tag.</h1>
@@ -735,8 +795,8 @@ function howView() {
 
       <h2>Two kinds of trucks</h2>
       <div class="two">
-        <div class="box box-mint"><h3>Contract truck</h3><p>Booked ahead with a carrier at a set price. Cheaper, but each lane's carrier only takes about so many trucks a week.</p></div>
-        <div class="box box-red"><h3>Spot truck</h3><p>Found at the last minute at market price. Costs more.</p></div>
+        <div class="box box-mint"><h3>Contract truck</h3><p>Booked ahead with a carrier at a set price. Cheaper, but each lane's carrier only takes about so many trucks a week, and needs ${SHORT_NOTICE_DAYS}+ days' notice.</p></div>
+        <div class="box box-red"><h3>Spot truck</h3><p>Found at the last minute at market price. Costs more. Used when the week's contract trucks are taken or there isn't enough notice.</p></div>
       </div>
 
       <h2>The price tag</h2>
@@ -747,18 +807,24 @@ function howView() {
         <div class="op">=</div>
         <div><strong>Profit per truck</strong><span>what Ball keeps</span></div>
       </div>
-      <p class="note">$3,100 is an average: Ball's 2025 can profit in North America divided by the truckloads it ships.</p>
+      <p class="note">$3,100 is an average: Ball's 2025 can profit in North America divided by the truckloads it ships.
+        <strong>Extra trucking depends on whether the lane still has contract trucks open that week.</strong> First come, first served.</p>
 
       <h2 id="example">One example, step by step</h2>
-      <p>Inventory Planning wants to move ${loads} truckloads of cans from Findlay to ${esc(lane.destination)}.</p>
+      <p>Findlay → ${esc(lane.destination)}: the contract carrier takes about <strong>${lane.contract_per_week} trucks a week</strong>.
+        A contract truck costs ${money(lane.contract_cost)}; a spot truck costs ${money(avgSpot(lane))}.</p>
       <ol class="steps">
-        <li><strong>A truck to move the cans</strong> costs ${money(lane.contract_cost)} on a contract truck.</li>
-        <li><strong>Shipping in 3 days?</strong> Under a week's notice is too late to book a contract truck, so we count a spot truck: <strong>+${money(lane.spot_premium)}</strong>.<br>
-          ${money(PROFIT_PER_TRUCK)} − ${money(now.extra_cost)} = ${tag(now)}</li>
-        <li><strong>Shipping a week or more out?</strong> Only ${pct(lane.spot_share)} of trucks on this lane end up spot, so the risk is ${pct(lane.spot_share)} × ${money(lane.spot_premium)} = <strong>+${money(later.spot_risk)}</strong>.<br>
-          ${money(PROFIT_PER_TRUCK)} − ${money(later.extra_cost)} = ${tag(later)}</li>
-        <li><strong>Planning a week ahead saves ${money(save)}</strong> on ${loads} loads. The app shows this before anyone decides.</li>
+        <li><strong>Inventory Planning sends 10 trucks for Wed, ${fmtShort(wed)}.</strong> ${lane.contract_per_week} contract trucks are open, so all 10 go on contract:
+          10 × ${money(one.cEach)} = ${money(one.extra)} extra trucking.<br>
+          ${money(one.making)} − ${money(one.extra)} = ${money(one.profit)} → ${tag(one)}</li>
+        <li><strong>Then Production sends 10 more the same week.</strong> Only ${two.room} contract trucks are left, so ${two.contract} go on contract and ${two.spot} on spot:
+          ${two.contract} × ${money(two.cEach)} + ${two.spot} × ${money(two.sEach)} = ${money(two.extra)}.<br>
+          ${money(two.making)} − ${money(two.extra)} = ${money(two.profit)} → ${tag(two)}</li>
+        <li><strong>Production ships the week after instead.</strong> That week's contract trucks are open, so all 10 go on contract → ${tag(moved)}.
+          <strong>Saves ${money(moved.profit - two.profit)}.</strong> The app suggests this date automatically.</li>
+        <li><strong>Anything with less than ${SHORT_NOTICE_DAYS} days' notice goes on spot</strong>, even if contract trucks are open: 10 × ${money(rush.sEach)} → ${tag(rush)}</li>
       </ol>
+      <p class="note">Every team sees this the moment they pick a lane and date, before they send anything.</p>
 
       <h2>What the colors mean</h2>
       <ul class="colors">
@@ -770,20 +836,19 @@ function howView() {
 
       <h2>Who does what</h2>
       <table class="who"><tbody>
-        <tr><th>Sales</th><td>Checks the price before saying yes to extra customer loads.</td></tr>
-        <tr><th>Production</th><td>Checks the price before an extra run that has to be trucked to a warehouse.</td></tr>
-        <tr><th>Inventory Planning</th><td>Checks the price before moving cans between sites.</td></tr>
-        <tr><th>Logistics</th><td>Sees every request early, books contract trucks while there's room on the contract, and types in real spot quotes so every price tag is current.</td></tr>
+        <tr><th>Sales</th><td>Sees whether extra customer loads fit on contract that week, and what Ball keeps, before saying yes.</td></tr>
+        <tr><th>Production</th><td>Sees whether an extra run's trucks to the warehouse fit on contract, and picks a better week if not.</td></tr>
+        <tr><th>Inventory Planning</th><td>Sees whether a move between sites fits on contract, and picks a better week if not.</td></tr>
+        <tr><th>Logistics</th><td>Confirms each booking, marks when a carrier says no, and types in real spot quotes so every price tag is current.</td></tr>
         <tr><th>Live Hub</th><td>Everyone sees the same requests and totals as they happen.</td></tr>
         <tr><th>Carriers</th><td>Get a 4-week look ahead so they can hold trucks for Ball.</td></tr>
       </tbody></table>
 
       <details class="source"><summary>Where the numbers come from</summary>
         <p>Ball's case workbook (Detail sheet), Findlay plant, January–July 2026, with short yard moves (shuttles) left out.
-        "Trucks that go spot" is the share of a lane's loads that went on spot trucks. The spot price starts at the lane's 2026 average. When Logistics gets a real quote from a spot carrier, they type it in and every team's price tag uses it instead.
-        "Contract trucks a week" is how many loads contract carriers actually took on that lane in 2026, divided by 30 weeks. Ball's real carrier contracts would replace it.
-        A price tag is an estimate until Logistics books the truck. Then it shows the final cost: no spot truck if booked on contract, a spot truck at today's price if not.
-        Less than 7 days' notice counts as a spot truck because the data is monthly and can't show how much notice each load had. That's an assumption.</p>
+        Contract and spot prices are each lane's 2026 averages. When Logistics gets a real quote from a spot carrier, they type it in and every price tag uses it instead.
+        Three rules (assumptions): (1) "Contract trucks a week" is how many loads contract carriers actually took on that lane in 2026, divided by 30 weeks; Ball's real carrier contracts would replace it.
+        (2) Contract trucks go first come, first served within each Sunday–Saturday week. (3) Less than ${SHORT_NOTICE_DAYS} days' notice goes on spot, because contract carriers need time (Ball's own plan: tender 3–5 days ahead).</p>
       </details>
 
       <a class="cta" href="./">Try it: pick a team</a>

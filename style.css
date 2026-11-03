@@ -308,3 +308,19 @@ input[type="date"] {
 .cal-detail li:first-child { border-top: 0; }
 .tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--white); font-size: 13px; padding: 6px 10px; border-radius: 8px; max-width: 320px; }
 .tip[hidden] { display: none; }
+
+/* ---------- Contract / spot split and the money box ---------- */
+.split-line { margin: 8px 0 2px; font-size: 15px; font-weight: 600; }
+.split-line .b { margin-left: 0; }
+.reason { font-size: 14px; font-weight: 600; }
+.reason-sm { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+.tag .room { margin: 8px 0 10px; }
+.moneybox { width: 100%; border-collapse: collapse; background: rgba(255,255,255,.75); border-radius: 10px; overflow: hidden; font-size: 15px; }
+.moneybox th, .moneybox td { padding: 7px 10px; border-bottom: 1px solid rgba(0,0,0,.06); white-space: nowrap; }
+.moneybox th { text-align: left; font-weight: 600; }
+.moneybox td { text-align: left; color: var(--muted); }
+.moneybox td:last-child { text-align: right; color: var(--ink); font-weight: 600; }
+.moneybox .mb-make th, .moneybox .mb-make td:last-child { color: var(--ink); }
+.moneybox .mb-left th, .moneybox .mb-left td { border-bottom: 0; border-top: 2px solid var(--ink); font-weight: 700; color: var(--ink); }
+.moneybox .mb-left td:last-child { font: 400 22px/1 var(--serif); }
+.card-left { font-size: 13px; color: var(--muted); }
