@@ -286,6 +286,72 @@ function scheduleTable(rows) {
   ${anyOver ? `<p class="small"><span class="warn">⚠</span> More trucks than that lane's contract carrier usually takes in a week. The extra ones will probably need spot trucks unless Logistics lines up more contract capacity.</p>` : ""}`;
 }
 
+// Calendar of trucks going out: 4 weeks (Sun–Sat) from the current week.
+// Each day is one stacked bar: contract at the bottom, then spot, then waiting.
+const CAL_BAR_PX = 72;
+const STATUS_ORDER = ["contract", "spot", "new"];
+const STATUS_SHORT = { contract: "contract", spot: "spot", new: "waiting" };
+
+function calendarPanel(rows, selected) {
+  const t0 = today();
+  const start = addDays(t0, -atNoon(t0).getDay()); // Sunday on or before today
+  const end = addDays(start, 27);
+  const byDay = new Map();
+  let after = 0;
+  for (const r of rows) {
+    const d = shipDateOf(r);
+    if (d > end) { after += r.loads; continue; }
+    if (d < start) continue;
+    if (!byDay.has(d)) byDay.set(d, { contract: 0, spot: 0, new: 0, rows: [] });
+    const day = byDay.get(d);
+    day[r.status] += r.loads;
+    day.rows.push(r);
+  }
+  const total = (c) => c.contract + c.spot + c.new;
+  const max = Math.max(1, ...[...byDay.values()].map(total));
+  const split = (c) => STATUS_ORDER.map((k) => `${c[k]} ${STATUS_SHORT[k]}`).join(" · ");
+
+  const bar = (c) => {
+    const segs = STATUS_ORDER.filter((k) => c[k]).map((k) =>
+      `<span class="seg seg-${k}" style="height:${Math.max(3, Math.round((c[k] / max) * CAL_BAR_PX))}px"></span>`);
+    return `<span class="cal-bar">${segs.join("")}</span>`;
+  };
+
+  let html = `<div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => `<div class="cal-head">${d}</div>`).join("")}<div class="cal-head">Week total</div>`;
+  for (let w = 0; w < 4; w++) {
+    const wk = { contract: 0, spot: 0, new: 0 };
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(start, w * 7 + i);
+      const c = byDay.get(d);
+      if (c) STATUS_ORDER.forEach((k) => (wk[k] += c[k]));
+      const cls = ["cal-day", d === t0 ? "cal-today" : "", d < t0 ? "cal-past" : "", d === selected ? "cal-selected" : "", c ? "has" : ""].join(" ");
+      const label = atNoon(d).getDate() === 1 || (w === 0 && i === 0) ? fmtShort(d) : atNoon(d).getDate();
+      html += `<button type="button" class="${cls}" data-day="${d}" ${c ? `data-tip="${esc(fmtDate(d))}: ${total(c)} trucks (${split(c)})"` : "disabled"}>
+        <span class="cal-date">${label}${d === t0 ? ` <em>today</em>` : ""}</span>
+        ${c ? `${bar(c)}<span class="cal-n">${total(c)}</span>` : `<span class="cal-empty">·</span>`}
+      </button>`;
+    }
+    const n = total(wk);
+    html += `<div class="cal-week">${n ? `<span class="cal-week-n">${n}</span>
+      <span class="cal-hbar">${STATUS_ORDER.filter((k) => wk[k]).map((k) => `<span class="seg seg-${k}" style="flex:${wk[k]}"></span>`).join("")}</span>
+      <span class="cal-week-split">${split(wk)}</span>` : `<span class="cal-empty">·</span>`}</div>`;
+  }
+  html += `</div>`;
+
+  if (selected && byDay.has(selected)) {
+    const day = byDay.get(selected);
+    html += `<div class="cal-detail"><h3>${esc(fmtDate(selected))}: ${total(day)} trucks</h3><ul>
+      ${day.rows.map((r) => `<li><span class="b b-${esc(r.status)}">${esc(r.loads)}</span>
+        <strong>Findlay → ${esc(r.destination)}</strong> · ${esc(STATUS[r.status])} · ${esc((TEAMS[r.team] || {}).name || r.team)}
+        · ${money(r.profit_per_truck)} profit / truck</li>`).join("")}
+    </ul></div>`;
+  } else {
+    html += `<p class="small">Click a day to see which lanes ship that day.</p>`;
+  }
+  if (after) html += `<p class="small">+${after} more trucks ship after ${esc(fmtDate(end))}.</p>`;
+  return html;
+}
+
 // What Ball's contracts look like on each Findlay lane.
 function contractsTable() {
   return `<div class="table-wrap"><table class="prices contracts">
@@ -567,16 +633,42 @@ function hubView(store, state) {
         <span class="live"><span class="pulse"></span>${store.live ? "Live" : "Local demo"}</span>
       </div>
       <div id="totals" class="totals"></div>
+      <section class="cal-panel">
+        <div class="cal-top"><h2>Trucks going out</h2>
+          <p class="legend"><span class="key key-contract"></span> on contract <span class="key key-spot"></span> on spot <span class="key key-new"></span> waiting on Logistics</p></div>
+        <div id="calendar"></div>
+      </section>
       <div class="hub-grid">
         <div><h2>Requests</h2><div id="feed" class="cards"></div></div>
-        <div><h2>Truck schedule: next 4 weeks</h2><div id="outlook"></div>
+        <div><h2>By lane: next 4 weeks</h2><div id="outlook"></div>
           <p class="small">The same numbers become the 4-week outlook we give carriers.</p>
           <details class="contracts-box"><summary>Our contracts by lane</summary><div id="contracts"></div></details></div>
       </div>
       <button type="button" id="reset" class="util quiet">New round</button>
     </section>`;
 
+  let selected = null;
   function mount() {
+    $("#calendar").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-day]");
+      if (!b || b.disabled) return;
+      selected = selected === b.dataset.day ? null : b.dataset.day;
+      $("#calendar").innerHTML = calendarPanel(state.rows, selected);
+    });
+    const tip = document.createElement("div");
+    tip.className = "tip";
+    tip.hidden = true;
+    document.body.append(tip);
+    $("#calendar").addEventListener("mousemove", (e) => {
+      const b = e.target.closest("[data-tip]");
+      tip.hidden = !b;
+      if (!b) return;
+      tip.textContent = b.dataset.tip;
+      const flip = e.clientX + 14 + tip.offsetWidth > innerWidth - 8;
+      tip.style.left = `${flip ? e.clientX - 14 - tip.offsetWidth : e.clientX + 14}px`;
+      tip.style.top = `${e.clientY + 14}px`;
+    });
+    $("#calendar").addEventListener("mouseleave", () => (tip.hidden = true));
     $("#reset").addEventListener("click", async () => {
       const pin = prompt("Enter the reset PIN to clear the hub for a new round:");
       if (pin === null) return;
@@ -607,6 +699,7 @@ function hubView(store, state) {
     $("#contracts").innerHTML = contractsTable();
     $("#feed").innerHTML = rows.length ? rows.map((r) => card(r)).join("") : `<p class="empty">Waiting for the first request…</p>`;
     $("#outlook").innerHTML = scheduleTable(rows);
+    $("#calendar").innerHTML = calendarPanel(rows, selected);
   }
 
   return { html, mount, live };

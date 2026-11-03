@@ -11,6 +11,7 @@
   --lteal: #bfdcd6;
   --grey: #e9e9e9;
   --muted: #5d5a55;
+  --contract: #0090a0;
   --green: #2f7a4a;
   --green-bg: #e3f1d8;
   --yellow: #a86f12;
@@ -138,7 +139,7 @@ button:disabled { opacity: .5; }
 .card-head time { margin-left: auto; color: var(--muted); }
 .pill { background: var(--ink); color: var(--white); border-radius: 999px; padding: 2px 10px; font-weight: 600; }
 .status { border-radius: 999px; padding: 2px 10px; font-weight: 600; background: rgba(255,255,255,.7); }
-.status-contract { background: var(--navy); color: var(--white); }
+.status-contract { background: var(--contract); color: var(--ink); }
 .status-spot { background: var(--red); color: var(--white); }
 .meta { font-size: 14px; color: var(--muted); margin: 2px 0 6px; }
 .flag { display: inline-block; margin-left: 6px; font-weight: 700; color: var(--red); }
@@ -237,9 +238,9 @@ input[type="date"] {
 
 /* ---------- Schedule & contracts ---------- */
 .b { display: inline-block; min-width: 26px; margin: 1px 2px; padding: 1px 7px; border-radius: 999px; font: 700 13px/1.5 var(--sans); text-align: center; }
-.b-contract { background: var(--navy); color: var(--white); }
+.b-contract { background: var(--contract); color: var(--ink); }
 .b-spot { background: var(--red); color: var(--white); }
-.b-new { background: var(--white); color: var(--ink); border: 1px solid #b9b5ab; }
+.b-new { background: var(--white); color: var(--ink); border: 1.5px dashed var(--muted); }
 .legend { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 .legend .b { margin-left: 8px; }
 .legend .b:first-child { margin-left: 0; }
@@ -248,9 +249,9 @@ input[type="date"] {
 .warn { color: var(--red); font-weight: 700; margin-left: 2px; }
 .est { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .room { font-size: 14px; margin-top: 8px; padding: 8px 10px; background: rgba(255,255,255,.7); border-radius: 8px; }
-.stat-contract { border-top: 5px solid var(--navy); }
+.stat-contract { border-top: 5px solid var(--contract); }
 .stat-spot { border-top: 5px solid var(--red); }
-.stat-new { border-top: 5px solid #b9b5ab; }
+.stat-new { border-top: 5px dashed var(--muted); }
 .stat-sub { font-size: 13px; color: var(--muted); }
 .contracts-box { margin-top: 18px; }
 .contracts-box summary { font-size: 18px; }
@@ -263,3 +264,47 @@ input[type="date"] {
   .contracts th { grid-column: 1 / -1; font-size: 16px; margin-bottom: 4px; }
   .contracts td::before { content: attr(data-label); display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 }
+
+/* ---------- Calendar: trucks going out ---------- */
+.cal-panel { background: var(--white); border-radius: 16px; padding: 18px 20px; margin-bottom: 22px; }
+.cal-top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.cal-top h2 { margin-bottom: 8px; }
+.key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin: 0 4px 0 12px; }
+.key-contract { background: var(--contract); }
+.key-spot { background: var(--red); }
+.key-new { border: 1.5px dashed var(--muted); }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr) 1.5fr; gap: 6px; }
+.cal-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 0 6px; }
+.cal-day {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  height: 136px; padding: 24px 4px 8px; border: 1px solid var(--grey); border-radius: 10px;
+  background: var(--cream); color: var(--ink); font: inherit; cursor: default;
+}
+.cal-day.has { cursor: pointer; background: var(--white); }
+.cal-day.has:hover { border-color: var(--ink); }
+.cal-day:disabled { opacity: 1; }
+.cal-past { opacity: .45 !important; }
+.cal-today { outline: 2px solid var(--teal); outline-offset: -2px; }
+.cal-selected { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.cal-date { position: absolute; top: 6px; left: 8px; font-size: 13px; font-weight: 600; }
+.cal-date em { font-style: normal; color: var(--teal); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.cal-bar { display: flex; flex-direction: column-reverse; gap: 2px; width: 24px; }
+.seg { display: block; width: 100%; }
+.cal-bar .seg:last-child { border-radius: 4px 4px 0 0; }
+.seg-contract { background: var(--contract); }
+.seg-spot { background: var(--red); }
+.seg-new { background: var(--white); border: 1.5px dashed var(--muted); box-sizing: border-box; }
+.cal-n { margin-top: 6px; font: 400 20px/1 var(--serif); }
+.cal-empty { color: #b9b5ab; padding-bottom: 8px; }
+.cal-week { display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 8px 12px; border-radius: 10px; background: var(--cream); }
+.cal-week-n { font: 400 28px/1 var(--serif); }
+.cal-hbar { display: flex; gap: 2px; height: 10px; border-radius: 0 4px 4px 0; overflow: hidden; }
+.cal-hbar .seg { height: 100%; }
+.cal-week-split { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.cal-detail { margin-top: 14px; padding: 14px 16px; background: var(--cream); border-radius: 12px; }
+.cal-detail h3 { margin-bottom: 8px; }
+.cal-detail ul { list-style: none; margin: 0; padding: 0; }
+.cal-detail li { padding: 6px 0; border-top: 1px solid var(--grey); font-size: 15px; }
+.cal-detail li:first-child { border-top: 0; }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--white); font-size: 13px; padding: 6px 10px; border-radius: 8px; max-width: 320px; }
+.tip[hidden] { display: none; }
