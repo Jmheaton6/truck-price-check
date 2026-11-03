@@ -1,0 +1,476 @@
+import { LANES } from "./lanes.js";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
+
+// ---------- The price tag (same math on every screen) ----------
+// Profit per truck = $3,100 average profit per truckload of cans
+//   − extra trucking: spot chance × the lane's spot premium,
+//     plus the move's own contract cost when it is a transfer (an extra truck move).
+// "This week" assumes spot (short notice); later weeks use the lane's 2026 spot share.
+const PROFIT_PER_TRUCK = 3100;
+const GREEN_AT = 2000;
+const YELLOW_AT = 1000;
+const WEEKS = ["This week", "Next week", "In 2 weeks", "In 3 weeks"];
+const VERDICT = {
+  green: "Go: good business",
+  yellow: "Talk to Logistics first",
+  red: "Rethink it: little or no profit left",
+};
+const STATUS = { new: "Waiting on Logistics", contract: "Booked on contract", spot: "Needs spot truck" };
+
+const TEAMS = {
+  sales: {
+    name: "Sales", kind: "order", type: "Extra customer order",
+    ask: "A customer wants extra loads", dest: "Customer location",
+    nudge: "If the customer can take it next week",
+  },
+  production: {
+    name: "Production", kind: "transfer", type: "Prebuild run",
+    ask: "Schedule an extra production run", dest: "Warehouse the run ships to",
+    nudge: "Ship it next week instead",
+  },
+  planning: {
+    name: "Inventory Planning", kind: "transfer", type: "Inventory move",
+    ask: "Move cans to another site", dest: "Move cans to",
+    nudge: "Ship it next week instead",
+  },
+  logistics: { name: "Logistics" },
+  hub: { name: "Live Hub" },
+  carrier: { name: "Carrier view" },
+};
+
+function laneFor(kind, destination) {
+  return LANES.find((l) => l.kind === kind && l.destination === destination);
+}
+
+function price(lane, week) {
+  const spot_chance = week === 0 ? 1 : lane.spot_share;
+  const base = lane.kind === "transfer" ? lane.contract_cost : 0;
+  const extra_cost = Math.round(base + spot_chance * lane.spot_premium);
+  const profit_per_truck = PROFIT_PER_TRUCK - extra_cost;
+  const color = profit_per_truck >= GREEN_AT ? "green" : profit_per_truck >= YELLOW_AT ? "yellow" : "red";
+  return { spot_chance, extra_cost, profit_per_truck, color };
+}
+
+// ---------- Data store: Supabase when configured, this browser otherwise ----------
+async function makeStore() {
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+    const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+    const check = ({ data, error }) => {
+      if (error) throw error;
+      return data;
+    };
+    return {
+      live: true,
+      list: async () => check(await db.from("requests").select("*").order("created_at", { ascending: false })),
+      add: async (row) => check(await db.from("requests").insert(row)),
+      update: async (id, patch) => check(await db.from("requests").update(patch).eq("id", id)),
+      reset: async (pin) => check(await db.rpc("reset_demo", { pin })),
+      subscribe(cb) {
+        db.channel("requests")
+          .on("postgres_changes", { event: "*", schema: "public", table: "requests" }, cb)
+          .subscribe();
+        setInterval(cb, 8000); // safety net if the room's Wi-Fi blocks websockets
+      },
+    };
+  }
+
+  const KEY = "tpc_requests";
+  const listeners = [];
+  const read = () => JSON.parse(localStorage.getItem(KEY) || "[]");
+  const write = (rows) => {
+    localStorage.setItem(KEY, JSON.stringify(rows));
+    listeners.forEach((f) => f());
+  };
+  return {
+    live: false,
+    list: async () => read(),
+    add: async (row) => write([{ ...row, id: Date.now(), created_at: new Date().toISOString(), status: "new" }, ...read()]),
+    update: async (id, patch) => write(read().map((r) => (r.id === id ? { ...r, ...patch } : r))),
+    reset: async () => write([]),
+    subscribe(cb) {
+      listeners.push(cb);
+      addEventListener("storage", (e) => e.key === KEY && cb());
+    },
+  };
+}
+
+// ---------- Helpers ----------
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const money = (n) => (n < 0 ? "−$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US");
+const pct = (x) => Math.round(x * 100) + "%";
+const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+function toast(msg, bad = false) {
+  const t = document.createElement("div");
+  t.className = "toast" + (bad ? " toast-bad" : "");
+  t.textContent = msg;
+  document.body.append(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+// ---------- Shared pieces ----------
+function priceTag(lane, week, loads, team) {
+  const p = price(lane, week);
+  const spotRisk = Math.round(p.spot_chance * lane.spot_premium);
+  const lines = [];
+  if (lane.kind === "transfer") lines.push(`Truck move on contract: ${money(lane.contract_cost)}`);
+  lines.push(week === 0
+    ? `Spot risk: short notice, so we assume a spot truck (+${money(lane.spot_premium)})`
+    : `Spot risk: ${pct(lane.spot_share)} chance × ${money(lane.spot_premium)} spot premium = ${money(spotRisk)}`);
+  lines.push(`${loads} loads = ${money(p.extra_cost * loads)} extra trucking`);
+  let nudge = "";
+  if (week === 0) {
+    const later = price(lane, 1);
+    const save = (later.profit_per_truck - p.profit_per_truck) * loads;
+    if (save > 0) {
+      nudge = `<div class="nudge">
+        <p><strong>${TEAMS[team].nudge}:</strong> ${money(later.profit_per_truck)} per truck.
+        Saves ${money(save)} on ${loads} loads.</p>
+        <button type="button" class="util" data-use-week="1">Use next week</button>
+      </div>`;
+    }
+  }
+  return `<div class="tag tag-${p.color}">
+    <p class="verdict"><span class="dot"></span>${VERDICT[p.color]}</p>
+    <p class="big">${money(p.profit_per_truck)}<small>profit per truck</small></p>
+    <p class="math">${money(PROFIT_PER_TRUCK)} profit − ${money(p.extra_cost)} extra trucking</p>
+    <ul class="why">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>
+    ${nudge}
+  </div>`;
+}
+
+function card(r, actions = "") {
+  const t = TEAMS[r.team] || { name: r.team, type: r.kind };
+  const flex = r.flex === "outside" ? `<span class="flag">Outside customer's forecast</span>` : "";
+  return `<article class="card card-${esc(r.color)}" data-id="${esc(r.id)}">
+    <div class="card-head">
+      <span class="pill">${esc(t.name)}</span>
+      <span class="status status-${esc(r.status)}">${esc(STATUS[r.status] || r.status)}</span>
+      <time>${esc(time(r.created_at))}</time>
+    </div>
+    <h3>${esc(t.type)} → ${esc(r.destination)}</h3>
+    <p class="meta">${esc(r.loads)} loads · ${esc(WEEKS[r.week])} ${flex}</p>
+    <p class="card-money"><strong>${money(r.profit_per_truck)}</strong> profit / truck
+      <span class="verdict-sm"><span class="dot"></span>${esc(VERDICT[r.color] || "")}</span></p>
+    ${actions}
+  </article>`;
+}
+
+function outlookTable(rows) {
+  const grid = new Map();
+  for (const r of rows) {
+    const key = `${r.kind}|${r.destination}`;
+    if (!grid.has(key)) grid.set(key, [0, 0, 0, 0]);
+    grid.get(key)[r.week] += r.loads;
+  }
+  if (!grid.size) return `<p class="empty">No trucks planned yet. Send a request to fill this in.</p>`;
+  const totals = [0, 0, 0, 0];
+  const body = [...grid.entries()]
+    .sort((a, b) => b[1].reduce((x, y) => x + y) - a[1].reduce((x, y) => x + y))
+    .map(([key, weeks]) => {
+      const [kind, dest] = key.split("|");
+      weeks.forEach((n, i) => (totals[i] += n));
+      return `<tr><th scope="row">Findlay → ${esc(dest)} <span class="kind">${kind === "order" ? "Customer" : "Transfer"}</span></th>
+        ${weeks.map((n) => `<td>${n || "·"}</td>`).join("")}</tr>`;
+    })
+    .join("");
+  return `<div class="table-wrap"><table class="outlook">
+    <thead><tr><th>Lane</th>${WEEKS.map((w) => `<th>${w}</th>`).join("")}</tr></thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr><th>Total trucks</th>${totals.map((n) => `<td>${n}</td>`).join("")}</tr></tfoot>
+  </table></div>`;
+}
+
+// ---------- Screens ----------
+function homeView() {
+  const tile = (role, line) => `<a class="team-tile" href="?role=${role}">
+      <span class="team-name">${TEAMS[role].name}</span><span class="team-line">${line}</span></a>`;
+  return {
+    html: `<section class="home">
+      <p class="eyebrow">Ball · Findlay pilot</p>
+      <h1>One price tag every team sees before they decide.</h1>
+      <p class="lede">Pick your team. Everything you send shows up on the Live Hub for everyone, right away.</p>
+      <div class="team-grid">
+        ${tile("sales", "A customer wants extra loads")}
+        ${tile("production", "Schedule an extra run")}
+        ${tile("planning", "Move cans between sites")}
+        ${tile("logistics", "Book the trucks")}
+      </div>
+      <a class="cta" href="?role=hub">Open the Live Hub</a>
+      <p class="small"><a href="?role=carrier">Carrier view</a>: the 4-week outlook we share with carriers.</p>
+    </section>`,
+  };
+}
+
+function requestView(team, store, state) {
+  const t = TEAMS[team];
+  const lanes = LANES.filter((l) => l.kind === t.kind);
+  const form = { destination: lanes[0].destination, loads: 10, week: 0, flex: "inside" };
+
+  const html = `<section class="panel">
+      <p class="eyebrow">${t.name}</p>
+      <h1>${t.ask}</h1>
+      <label class="field"><span class="label">${t.dest}</span>
+        <select id="dest">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select>
+      </label>
+      <div class="field"><span class="label">How many truckloads?</span>
+        <div class="stepper">
+          <button type="button" data-step="-1" aria-label="One less">−</button>
+          <output id="loads">10</output>
+          <button type="button" data-step="1" aria-label="One more">+</button>
+          <span class="presets">${[5, 10, 20].map((n) => `<button type="button" class="chip-btn" data-loads="${n}">${n}</button>`).join("")}</span>
+        </div>
+      </div>
+      <div class="field"><span class="label">When does it ship?</span>
+        <div class="seg" id="week">${WEEKS.map((w, i) => `<button type="button" data-week="${i}">${w}</button>`).join("")}</div>
+      </div>
+      ${team === "sales" ? `<div class="field"><span class="label">Is this inside the customer's forecast (±10%)?</span>
+        <div class="seg" id="flex"><button type="button" data-flex="inside">Yes</button><button type="button" data-flex="outside">No, it's extra</button></div>
+      </div>` : ""}
+      <div id="tag"></div>
+      <button type="button" id="send" class="cta">Send to the hub</button>
+    </section>
+    <section class="panel">
+      <h2>Your team's requests</h2>
+      <div id="mine" class="cards"></div>
+    </section>`;
+
+  function paint() {
+    const lane = laneFor(t.kind, form.destination);
+    $("#loads").textContent = form.loads;
+    document.querySelectorAll("#week button").forEach((b) => b.classList.toggle("on", +b.dataset.week === form.week));
+    document.querySelectorAll("#flex button").forEach((b) => b.classList.toggle("on", b.dataset.flex === form.flex));
+    $("#tag").innerHTML = priceTag(lane, form.week, form.loads, team);
+  }
+
+  function mount() {
+    $("#dest").addEventListener("change", (e) => { form.destination = e.target.value; paint(); });
+    $("#app").addEventListener("click", async (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.step) form.loads = Math.min(200, Math.max(1, form.loads + +b.dataset.step));
+      else if (b.dataset.loads) form.loads = +b.dataset.loads;
+      else if (b.dataset.week) form.week = +b.dataset.week;
+      else if (b.dataset.flex) form.flex = b.dataset.flex;
+      else if (b.dataset.useWeek) form.week = +b.dataset.useWeek;
+      else if (b.id === "send") return send(b);
+      else if (b.dataset.move) return moveLater(b);
+      else return;
+      paint();
+    });
+    paint();
+  }
+
+  async function send(btn) {
+    const lane = laneFor(t.kind, form.destination);
+    const row = {
+      team, kind: t.kind, destination: form.destination, loads: form.loads, week: form.week,
+      flex: team === "sales" ? form.flex : null, ...price(lane, form.week),
+    };
+    btn.disabled = true;
+    try {
+      await store.add(row);
+      toast("Sent. It's on the Live Hub now.");
+      state.refresh();
+    } catch (err) {
+      toast("Couldn't send: " + err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function moveLater(btn) {
+    const r = state.rows.find((x) => String(x.id) === btn.dataset.move);
+    const lane = r && laneFor(r.kind, r.destination);
+    if (!lane) return;
+    btn.disabled = true;
+    try {
+      await store.update(r.id, { week: 1, ...price(lane, 1) });
+      toast("Moved to next week.");
+      state.refresh();
+    } catch (err) {
+      toast("Couldn't update: " + err.message, true);
+      btn.disabled = false;
+    }
+  }
+
+  function live(rows) {
+    const mine = rows.filter((r) => r.team === team);
+    $("#mine").innerHTML = mine.length
+      ? mine.map((r) => {
+          const lane = laneFor(r.kind, r.destination);
+          let action = "";
+          if (lane && r.week === 0 && r.status === "new") {
+            const save = (price(lane, 1).profit_per_truck - r.profit_per_truck) * r.loads;
+            if (save > 0) action = `<div class="card-actions"><button type="button" class="util" data-move="${esc(r.id)}">Move to next week · save ${money(save)}</button></div>`;
+          }
+          return card(r, action);
+        }).join("")
+      : `<p class="empty">Nothing sent yet.</p>`;
+  }
+
+  return { html, mount, live };
+}
+
+function logisticsView(store, state) {
+  const html = `<section class="panel">
+      <p class="eyebrow">Logistics</p>
+      <h1>Book the trucks</h1>
+      <p class="lede">Every team's requests land here. Book them on contract when you can.</p>
+      <div id="incoming" class="cards"></div>
+    </section>
+    <section class="panel">
+      <details>
+        <summary>Lane price list (Findlay, 2026 data)</summary>
+        <div class="table-wrap"><table class="prices">
+          <thead><tr><th>Lane</th><th>Spot share</th><th>Truck move</th><th>Spot premium</th></tr></thead>
+          <tbody>${LANES.map((l) => `<tr><th scope="row">${esc(l.destination)} <span class="kind">${l.kind === "order" ? "Customer" : "Transfer"}</span></th>
+            <td>${pct(l.spot_share)}</td><td>${l.kind === "transfer" ? money(l.contract_cost) : "In price"}</td><td>${money(l.spot_premium)}</td></tr>`).join("")}</tbody>
+        </table></div>
+        <p class="small">Logistics owns this list and updates it from contract rates and each lane's spot history.</p>
+      </details>
+    </section>`;
+
+  function mount() {
+    $("#app").addEventListener("click", async (e) => {
+      const b = e.target.closest("button[data-status]");
+      if (!b) return;
+      b.disabled = true;
+      try {
+        await store.update(Number(b.dataset.id) || b.dataset.id, { status: b.dataset.status });
+        state.refresh();
+      } catch (err) {
+        toast("Couldn't update: " + err.message, true);
+        b.disabled = false;
+      }
+    });
+  }
+
+  function live(rows) {
+    const order = { new: 0, spot: 1, contract: 2 };
+    const sorted = [...rows].sort((a, b) => order[a.status] - order[b.status]);
+    $("#incoming").innerHTML = sorted.length
+      ? sorted.map((r) => card(r, `<div class="card-actions">
+          <button type="button" class="util${r.status === "contract" ? " on" : ""}" data-status="contract" data-id="${esc(r.id)}">Book contract</button>
+          <button type="button" class="util${r.status === "spot" ? " on" : ""}" data-status="spot" data-id="${esc(r.id)}">Needs spot</button>
+        </div>`)).join("")
+      : `<p class="empty">No requests yet. They'll appear here the moment another team sends one.</p>`;
+  }
+
+  return { html, mount, live };
+}
+
+function hubView(store, state) {
+  const html = `<section class="hub">
+      <div class="hub-head">
+        <div><p class="eyebrow">Ball · Findlay pilot</p><h1>Live Hub</h1>
+        <p class="lede">Every team's decisions with the same price tag, as they happen.</p></div>
+        <span class="live"><span class="pulse"></span>${store.live ? "Live" : "Local demo"}</span>
+      </div>
+      <div id="totals" class="totals"></div>
+      <div class="hub-grid">
+        <div><h2>Requests</h2><div id="feed" class="cards"></div></div>
+        <div><h2>Next 4 weeks: trucks needed</h2><div id="outlook"></div>
+          <p class="small">The same numbers become the 4-week outlook we give carriers.</p></div>
+      </div>
+      <button type="button" id="reset" class="util quiet">New round</button>
+    </section>`;
+
+  function mount() {
+    $("#reset").addEventListener("click", async () => {
+      const pin = prompt("Enter the reset PIN to clear the hub for a new round:");
+      if (pin === null) return;
+      try {
+        await store.reset(pin);
+        toast("Hub cleared.");
+        state.refresh();
+      } catch (err) {
+        toast("Not cleared: " + err.message, true);
+      }
+    });
+  }
+
+  function live(rows) {
+    let profit = 0, extra = 0, spot = 0;
+    const colors = { green: 0, yellow: 0, red: 0 };
+    for (const r of rows) {
+      profit += r.profit_per_truck * r.loads;
+      extra += r.extra_cost * r.loads;
+      spot += r.status === "spot" ? r.loads : r.status === "contract" ? 0 : r.spot_chance * r.loads;
+      colors[r.color] = (colors[r.color] || 0) + 1;
+    }
+    const tile = (label, value, sub = "") => `<div class="stat"><p class="stat-label">${label}</p><p class="stat-value">${value}</p>${sub ? `<p class="stat-sub">${sub}</p>` : ""}</div>`;
+    $("#totals").innerHTML =
+      tile("Requests", rows.length, `<span class="c c-green">${colors.green}</span> <span class="c c-yellow">${colors.yellow}</span> <span class="c c-red">${colors.red}</span>`) +
+      tile("Profit kept", money(profit)) +
+      tile("Extra trucking", money(extra)) +
+      tile("Trucks likely on spot", Math.round(spot));
+    $("#feed").innerHTML = rows.length ? rows.map((r) => card(r)).join("") : `<p class="empty">Waiting for the first request…</p>`;
+    $("#outlook").innerHTML = outlookTable(rows);
+  }
+
+  return { html, mount, live };
+}
+
+function carrierView() {
+  const html = `<section class="panel">
+      <p class="eyebrow">Shared with carriers</p>
+      <h1>Findlay, OH: trucks we need, next 4 weeks</h1>
+      <p class="lede">Straight from Ball's shared plan, so you can commit trucks before we tender them.</p>
+      <div id="outlook"></div>
+    </section>`;
+  return { html, live: (rows) => ($("#outlook").innerHTML = outlookTable(rows)) };
+}
+
+// ---------- Boot ----------
+async function main() {
+  const role = new URLSearchParams(location.search).get("role");
+  const team = TEAMS[role] ? role : null;
+  const store = await makeStore();
+  const state = { rows: [], refresh: null };
+
+  if (!store.live) {
+    const b = $("#mode-banner");
+    b.hidden = false;
+    b.textContent = "Local demo mode: requests stay in this browser. Add the Supabase keys in config.js to share across devices.";
+  }
+  if (team) {
+    const chip = $("#team-chip");
+    chip.hidden = false;
+    chip.innerHTML = `<a href="./">${esc(TEAMS[team].name)} ▾</a>`;
+    document.title = `${TEAMS[team].name} · Truck Price Check`;
+  }
+  document.body.dataset.role = team || "home";
+
+  const view =
+    !team ? homeView()
+    : team === "logistics" ? logisticsView(store, state)
+    : team === "hub" ? hubView(store, state)
+    : team === "carrier" ? carrierView()
+    : requestView(team, store, state);
+
+  $("#app").innerHTML = view.html;
+  view.mount?.();
+
+  let busy = false;
+  state.refresh = async () => {
+    if (!view.live || busy) return;
+    busy = true;
+    try {
+      state.rows = await store.list();
+      view.live(state.rows);
+    } catch (err) {
+      toast("Can't reach the hub: " + err.message, true);
+    } finally {
+      busy = false;
+    }
+  };
+  if (view.live) {
+    store.subscribe(() => state.refresh());
+    state.refresh();
+  }
+}
+
+main();
