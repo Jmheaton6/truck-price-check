@@ -340,3 +340,13 @@ input[type="date"] {
 
 /* Desktop-only demo: give Logistics room for its tables */
 body[data-role="logistics"] main { max-width: 960px; }
+
+/* ---------- Logistics tabs ---------- */
+.tabs { display: flex; gap: 6px; margin-top: 14px; border-bottom: 1px solid var(--grey); }
+.tab { padding: 10px 18px; border: 0; border-bottom: 3px solid transparent; background: none; color: var(--muted);
+  font: 600 16px var(--sans); margin-bottom: -1px; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.tab:hover { color: var(--ink); }
+.tab-count { display: inline-block; min-width: 22px; margin-left: 6px; padding: 0 7px; border-radius: 999px;
+  background: var(--ink); color: var(--white); font-size: 13px; text-align: center; }
+.tab-panel[hidden] { display: none; }

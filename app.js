@@ -581,12 +581,20 @@ function logisticsView(store, state) {
   const html = `<section class="panel">
       <p class="eyebrow">Logistics</p>
       <h1>Book the trucks</h1>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab" data-tab="requests" id="tab-requests">Requests</button>
+        <button type="button" role="tab" class="tab" data-tab="prices">Spot prices &amp; contracts</button>
+      </div>
+    </section>
+    <div class="tab-panel" data-panel="requests">
+    <section class="panel">
       <p class="lede">Every team's requests land here with their contract / spot split already worked out from each lane's contract trucks for that week. Confirm the booking, or mark it if the contract carrier says no. <a href="?role=how">How it works</a></p>
-      <a class="guide-link" href="#quote"><strong>Got a spot quote?</strong> Enter it so every team sees the real price ↓</a>
       <h2 id="todo-title" class="sub-h">Needs a decision</h2>
       <div id="incoming" class="cards"></div>
       <div id="done"></div>
     </section>
+    </div>
+    <div class="tab-panel" data-panel="prices">
     <section class="panel" id="quote">
       <h2>Got a spot quote? Enter it here</h2>
       <p class="lede">Type the price a spot carrier quoted you. Every team's price tag for that lane updates right away. All lanes start at Ball's Findlay, OH plant (the pilot).</p>
@@ -605,7 +613,15 @@ function logisticsView(store, state) {
     <section class="panel">
       <h2>Our contracts</h2>
       <div id="contracts"></div>
-    </section>`;
+    </section>
+    </div>`;
+
+  // Tabs: remembered in the URL hash so a reload stays on the same tab.
+  function showTab(name) {
+    document.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
+    document.querySelectorAll(".tab-panel").forEach((p) => (p.hidden = p.dataset.panel !== name));
+    history.replaceState(null, "", name === "prices" ? "#prices" : location.pathname + location.search);
+  }
 
   const pickLane = () => {
     const [kind, dest] = $("#q-lane").value.split("|");
@@ -641,6 +657,8 @@ function logisticsView(store, state) {
   let doneOpen = false; // keep the Done list open or closed across live updates
   function mount() {
     $("#app").addEventListener("toggle", (e) => { if (e.target.id === "done-box") doneOpen = e.target.open; }, true);
+    document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+    showTab(location.hash === "#prices" ? "prices" : "requests");
     $("#q-lane").addEventListener("change", fillQuote);
     $("#q-save").addEventListener("click", () => saveQuote(false));
     $("#q-clear").addEventListener("click", () => saveQuote(true));
@@ -670,6 +688,7 @@ function logisticsView(store, state) {
     const todo = rows.filter((r) => r.status === "new").sort(byShip);
     const done = rows.filter((r) => r.status !== "new").sort(byShip);
     $("#todo-title").textContent = todo.length ? `Needs a decision (${todo.length})` : "Needs a decision";
+    $("#tab-requests").innerHTML = todo.length ? `Requests <span class="tab-count">${todo.length}</span>` : "Requests";
     $("#incoming").innerHTML = todo.length
       ? todo.map((r) => {
           const a = alloc.get(r.id);
