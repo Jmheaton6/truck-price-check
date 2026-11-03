@@ -72,7 +72,8 @@ function splitMoney(lane, contract, spot) {
   const making = PROFIT_PER_TRUCK * loads;
   const profit = making - extra;
   const perTruck = Math.round(profit / loads);
-  return { cEach, sEach, contractCost, spotCost, extra, making, profit, perTruck, color: colorFor(perTruck) };
+  const overspend = spot * lane.spot_premium; // what spot cost above the contract price
+  return { cEach, sEach, contractCost, spotCost, extra, making, profit, perTruck, overspend, color: colorFor(perTruck) };
 }
 
 // Walk every request in the order it was sent and hand out contract trucks.
@@ -756,7 +757,7 @@ function hubView(store, state) {
 
   function live(rows) {
     const alloc = allocate(rows);
-    const t = { contract: 0, spot: 0, contractCost: 0, spotCost: 0, making: 0, profit: 0 };
+    const t = { contract: 0, spot: 0, extra: 0, overspend: 0, making: 0, profit: 0 };
     let waiting = 0;
     for (const r of rows) {
       const a = alloc.get(r.id);
@@ -767,9 +768,9 @@ function hubView(store, state) {
     const tile = (label, value, sub = "", cls = "") => `<div class="stat ${cls}"><p class="stat-label">${label}</p><p class="stat-value">${value}</p>${sub ? `<p class="stat-sub">${sub}</p>` : ""}</div>`;
     $("#totals").innerHTML =
       tile("Trucks on contract", t.contract, "within each lane's weekly contract", "stat-contract") +
-      tile("Trucks on spot", t.spot, "contract full, short notice or carrier said no", "stat-spot") +
-      tile("Extra trucking", money(t.contractCost + t.spotCost), `${money(t.contractCost)} contract moves · ${money(t.spotCost)} spot`) +
-      tile("Profit left", money(t.profit), `of ${money(t.making)} made`);
+      tile("Trucks on spot", t.spot, "contract full, short notice or carrier said no") +
+      tile("Spot overspend", money(t.overspend), "what spot trucks cost above contract prices. Planning ahead saves this.", "stat-spot") +
+      tile("Profit left", money(t.profit), `${money(t.making)} the cans earn − ${money(t.extra)} extra trucking`);
     $("#contracts").innerHTML = contractsTable();
     $("#feed-title").textContent = waiting ? `Requests (${waiting} waiting on Logistics)` : "Requests";
     $("#feed").innerHTML = rows.length ? rows.map((r) => card(r, alloc.get(r.id))).join("") : `<p class="empty">Waiting for the first request…</p>`;
