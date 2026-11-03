@@ -5,11 +5,11 @@ import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 // Profit per truck = $3,100 average profit per truckload of cans
 //   − extra trucking: spot chance × the lane's spot premium,
 //     plus the move's own contract cost when it is a transfer (an extra truck move).
-// "This week" assumes spot (short notice); later weeks use the lane's 2026 spot share.
+// Under 7 days' notice assumes a spot truck; 7+ days uses the lane's 2026 spot share.
 const PROFIT_PER_TRUCK = 3100;
 const GREEN_AT = 2000;
 const YELLOW_AT = 1000;
-const WEEKS = ["This week", "Next week", "In 2 weeks", "In 3 weeks"];
+const SHORT_NOTICE_DAYS = 7;
 const VERDICT = {
   green: "Go: good business",
   yellow: "Talk to Logistics first",
@@ -21,17 +21,17 @@ const TEAMS = {
   sales: {
     name: "Sales", kind: "order", type: "Extra customer order",
     ask: "A customer wants extra loads", dest: "Customer location",
-    nudge: "If the customer can take it next week",
+    nudge: "If the customer can take it on",
   },
   production: {
     name: "Production", kind: "transfer", type: "Prebuild run",
     ask: "Schedule an extra production run", dest: "Warehouse the run ships to",
-    nudge: "Ship it next week instead",
+    nudge: "Ship it on",
   },
   planning: {
     name: "Inventory Planning", kind: "transfer", type: "Inventory move",
     ask: "Move cans to another site", dest: "Move cans to",
-    nudge: "Ship it next week instead",
+    nudge: "Ship it on",
   },
   logistics: { name: "Logistics" },
   hub: { name: "Live Hub" },
@@ -39,12 +39,25 @@ const TEAMS = {
   how: { name: "How it works" },
 };
 
-function laneFor(kind, destination) {
+// Spot quotes Logistics typed in today, keyed "kind|destination". They replace the
+// lane's 2026 average spot price on every device until Logistics clears them.
+let QUOTES = new Map();
+const laneKey = (l) => `${l.kind}|${l.destination}`;
+const avgSpot = (l) => l.contract_cost + l.spot_premium;
+
+function baseLane(kind, destination) {
   return LANES.find((l) => l.kind === kind && l.destination === destination);
 }
 
-function price(lane, week) {
-  const spot_chance = week === 0 ? 1 : Math.round(lane.spot_share * 100) / 100;
+function laneFor(kind, destination) {
+  const lane = baseLane(kind, destination);
+  const q = lane && QUOTES.get(laneKey(lane));
+  if (!q) return lane;
+  return { ...lane, quote: q.quote, spot_premium: Math.max(0, q.quote - lane.contract_cost) };
+}
+
+function price(lane, noticeDays) {
+  const spot_chance = noticeDays < SHORT_NOTICE_DAYS ? 1 : Math.round(lane.spot_share * 100) / 100;
   const base = lane.kind === "transfer" ? lane.contract_cost : 0;
   const spot_risk = Math.round(spot_chance * lane.spot_premium);
   const extra_cost = base + spot_risk;
@@ -68,9 +81,15 @@ async function makeStore() {
       add: async (row) => check(await db.from("requests").insert(row)),
       update: async (id, patch) => check(await db.from("requests").update(patch).eq("id", id)),
       reset: async (pin) => check(await db.rpc("reset_demo", { pin })),
+      quotes: async () => check(await db.from("spot_quotes").select("*")),
+      setQuote: async (kind, destination, quote) =>
+        check(await db.from("spot_quotes").upsert({ kind, destination, quote, updated_at: new Date().toISOString() })),
+      clearQuote: async (kind, destination) =>
+        check(await db.from("spot_quotes").delete().eq("kind", kind).eq("destination", destination)),
       subscribe(cb) {
-        db.channel("requests")
+        db.channel("live")
           .on("postgres_changes", { event: "*", schema: "public", table: "requests" }, cb)
+          .on("postgres_changes", { event: "*", schema: "public", table: "spot_quotes" }, cb)
           .subscribe();
         setInterval(cb, 8000); // safety net if the room's Wi-Fi blocks websockets
       },
@@ -78,10 +97,16 @@ async function makeStore() {
   }
 
   const KEY = "tpc_requests";
+  const QKEY = "tpc_quotes";
   const listeners = [];
   const read = () => JSON.parse(localStorage.getItem(KEY) || "[]");
   const write = (rows) => {
     localStorage.setItem(KEY, JSON.stringify(rows));
+    listeners.forEach((f) => f());
+  };
+  const readQ = () => JSON.parse(localStorage.getItem(QKEY) || "[]");
+  const writeQ = (rows) => {
+    localStorage.setItem(QKEY, JSON.stringify(rows));
     listeners.forEach((f) => f());
   };
   return {
@@ -89,10 +114,16 @@ async function makeStore() {
     list: async () => read(),
     add: async (row) => write([{ ...row, id: Date.now(), created_at: new Date().toISOString(), status: "new" }, ...read()]),
     update: async (id, patch) => write(read().map((r) => (r.id === id ? { ...r, ...patch } : r))),
-    reset: async () => write([]),
+    reset: async () => { writeQ([]); write([]); },
+    quotes: async () => readQ(),
+    setQuote: async (kind, destination, quote) =>
+      writeQ([...readQ().filter((q) => q.kind !== kind || q.destination !== destination),
+        { kind, destination, quote, updated_at: new Date().toISOString() }]),
+    clearQuote: async (kind, destination) =>
+      writeQ(readQ().filter((q) => q.kind !== kind || q.destination !== destination)),
     subscribe(cb) {
       listeners.push(cb);
-      addEventListener("storage", (e) => e.key === KEY && cb());
+      addEventListener("storage", (e) => (e.key === KEY || e.key === QKEY) && cb());
     },
   };
 }
@@ -104,6 +135,20 @@ const money = (n) => (n < 0 ? "−$" : "$") + Math.abs(Math.round(n)).toLocaleSt
 const pct = (x) => Math.round(x * 100) + "%";
 const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
+// Dates are local calendar days as "YYYY-MM-DD".
+const DAY_MS = 86400000;
+const isoDate = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const atNoon = (iso) => new Date(iso + "T12:00:00");
+const today = () => isoDate(new Date());
+const addDays = (iso, n) => { const d = atNoon(iso); d.setDate(d.getDate() + n); return isoDate(d); };
+const daysBetween = (a, b) => Math.round((atNoon(b) - atNoon(a)) / DAY_MS);
+const fmtDate = (iso) => atNoon(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+const fmtShort = (iso) => atNoon(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const noticeText = (n) => (n === 0 ? "same-day notice" : n === 1 ? "1 day's notice" : `${n} days' notice`);
+// Rows sent before ship dates existed only have a week number.
+const shipDateOf = (r) => r.ship_date || addDays(isoDate(new Date(r.created_at)), (r.week ?? 0) * 7);
+const noticeOf = (r) => r.notice_days ?? (r.week ? r.week * 7 : 0);
+
 function toast(msg, bad = false) {
   const t = document.createElement("div");
   t.className = "toast" + (bad ? " toast-bad" : "");
@@ -113,23 +158,27 @@ function toast(msg, bad = false) {
 }
 
 // ---------- Shared pieces ----------
-function priceTag(lane, week, loads, team) {
-  const p = price(lane, week);
+function priceTag(lane, notice, loads, team) {
+  const p = price(lane, notice);
   const lines = [];
   if (lane.kind === "transfer") lines.push(`Truck to move the cans (contract price): ${money(lane.contract_cost)}`);
-  lines.push(week === 0
-    ? `Shipping this week is last-minute, so we count a spot truck: +${money(lane.spot_premium)}`
+  lines.push(notice < SHORT_NOTICE_DAYS
+    ? `Only ${noticeText(notice)}, too late to book a contract truck, so we count a spot truck: +${money(lane.spot_premium)}`
     : `${pct(lane.spot_share)} of trucks on this lane end up spot, at ${money(lane.spot_premium)} extra each: +${money(p.spot_risk)}`);
   lines.push(`${loads} loads × ${money(p.extra_cost)} = ${money(p.extra_cost * loads)} extra trucking`);
+  const source = lane.quote != null
+    ? `<p class="source-line quoted">Spot price ${money(lane.quote)}: <strong>today's quote from Logistics</strong> (2026 average ${money(avgSpot(baseLane(lane.kind, lane.destination)))})</p>`
+    : `<p class="source-line">Spot price ${money(avgSpot(lane))}: 2026 average. Logistics can update it with a real quote.</p>`;
   let nudge = "";
-  if (week === 0) {
-    const later = price(lane, 1);
+  if (notice < SHORT_NOTICE_DAYS) {
+    const laterDate = addDays(today(), SHORT_NOTICE_DAYS);
+    const later = price(lane, SHORT_NOTICE_DAYS);
     const save = (later.profit_per_truck - p.profit_per_truck) * loads;
     if (save > 0) {
       nudge = `<div class="nudge">
-        <p><strong>${TEAMS[team].nudge}:</strong> ${money(later.profit_per_truck)} per truck.
+        <p><strong>${TEAMS[team].nudge} ${fmtDate(laterDate)} instead:</strong> ${money(later.profit_per_truck)} per truck.
         Saves ${money(save)} on ${loads} loads.</p>
-        <button type="button" class="util" data-use-week="1">Use next week</button>
+        <button type="button" class="util" data-use-date="${laterDate}">Use ${fmtDate(laterDate)}</button>
       </div>`;
     }
   }
@@ -138,6 +187,7 @@ function priceTag(lane, week, loads, team) {
     <p class="big">${money(p.profit_per_truck)}<small>profit per truck</small></p>
     <p class="math">${money(PROFIT_PER_TRUCK)} profit − ${money(p.extra_cost)} extra trucking</p>
     <ul class="why">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>
+    ${source}
     <a class="how-link" href="?role=how#example">How is this figured?</a>
     ${nudge}
   </div>`;
@@ -153,7 +203,7 @@ function card(r, actions = "") {
       <time>${esc(time(r.created_at))}</time>
     </div>
     <h3>${esc(t.type)} → ${esc(r.destination)}</h3>
-    <p class="meta">${esc(r.loads)} loads · ${esc(WEEKS[r.week])} ${flex}</p>
+    <p class="meta">${esc(r.loads)} loads · Ships ${esc(fmtDate(shipDateOf(r)))} (${esc(noticeText(noticeOf(r)))}) ${flex}</p>
     <p class="card-money"><strong>${money(r.profit_per_truck)}</strong> profit / truck
       <span class="verdict-sm"><span class="dot"></span>${esc(VERDICT[r.color] || "")}</span></p>
     ${actions}
@@ -161,27 +211,39 @@ function card(r, actions = "") {
 }
 
 function outlookTable(rows) {
+  const t0 = today();
+  const heads = [0, 1, 2, 3].map((i) => {
+    const a = addDays(t0, i * 7), b = addDays(t0, i * 7 + 6);
+    return atNoon(a).getMonth() === atNoon(b).getMonth() ? `${fmtShort(a)}–${atNoon(b).getDate()}` : `${fmtShort(a)}–${fmtShort(b)}`;
+  });
   const grid = new Map();
+  let anyLater = false;
   for (const r of rows) {
+    const d = daysBetween(t0, shipDateOf(r));
+    if (d < 0) continue; // already shipped
+    const col = Math.min(4, Math.floor(d / 7));
+    if (col === 4) anyLater = true;
     const key = `${r.kind}|${r.destination}`;
-    if (!grid.has(key)) grid.set(key, [0, 0, 0, 0]);
-    grid.get(key)[r.week] += r.loads;
+    if (!grid.has(key)) grid.set(key, [0, 0, 0, 0, 0]);
+    grid.get(key)[col] += r.loads;
   }
   if (!grid.size) return `<p class="empty">No trucks planned yet. Send a request to fill this in.</p>`;
-  const totals = [0, 0, 0, 0];
+  const cols = anyLater ? 5 : 4;
+  const totals = [0, 0, 0, 0, 0];
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
   const body = [...grid.entries()]
-    .sort((a, b) => b[1].reduce((x, y) => x + y) - a[1].reduce((x, y) => x + y))
+    .sort((a, b) => sum(b[1]) - sum(a[1]))
     .map(([key, weeks]) => {
       const [kind, dest] = key.split("|");
       weeks.forEach((n, i) => (totals[i] += n));
       return `<tr><th scope="row">Findlay → ${esc(dest)} <span class="kind">${kind === "order" ? "Customer" : "Transfer"}</span></th>
-        ${weeks.map((n) => `<td>${n || "·"}</td>`).join("")}</tr>`;
+        ${weeks.slice(0, cols).map((n) => `<td>${n || "·"}</td>`).join("")}</tr>`;
     })
     .join("");
   return `<div class="table-wrap"><table class="outlook">
-    <thead><tr><th>Lane</th>${WEEKS.map((w) => `<th>${w}</th>`).join("")}</tr></thead>
+    <thead><tr><th>Lane</th>${heads.map((h) => `<th>${h}</th>`).join("")}${anyLater ? "<th>Later</th>" : ""}</tr></thead>
     <tbody>${body}</tbody>
-    <tfoot><tr><th>Total trucks</th>${totals.map((n) => `<td>${n}</td>`).join("")}</tr></tfoot>
+    <tfoot><tr><th>Total trucks</th>${totals.slice(0, cols).map((n) => `<td>${n}</td>`).join("")}</tr></tfoot>
   </table></div>`;
 }
 
@@ -210,12 +272,13 @@ function homeView() {
 function requestView(team, store, state) {
   const t = TEAMS[team];
   const lanes = LANES.filter((l) => l.kind === t.kind);
-  const form = { destination: lanes[0].destination, loads: 10, week: 0, flex: "inside" };
+  const form = { destination: lanes[0].destination, loads: 10, shipDate: addDays(today(), 2), flex: "inside" };
+  const notice = () => daysBetween(today(), form.shipDate);
 
   const html = `<section class="panel">
       <p class="eyebrow">${t.name}</p>
       <h1>${t.ask}</h1>
-      <p class="lede">Pick where, how many and when. The price tag shows what Ball keeps after trucking. Then send it to the hub.</p>
+      <p class="lede">Pick where, how many and the ship date. The price tag shows what Ball keeps after trucking. Then send it to the hub.</p>
       <label class="field"><span class="label">${t.dest}</span>
         <select id="dest">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select>
       </label>
@@ -227,9 +290,10 @@ function requestView(team, store, state) {
           <span class="presets">${[5, 10, 20].map((n) => `<button type="button" class="chip-btn" data-loads="${n}">${n}</button>`).join("")}</span>
         </div>
       </div>
-      <div class="field"><span class="label">When does it ship?</span>
-        <div class="seg" id="week">${WEEKS.map((w, i) => `<button type="button" data-week="${i}">${w}</button>`).join("")}</div>
-      </div>
+      <label class="field"><span class="label">Ship date</span>
+        <input id="ship" type="date" min="${today()}" max="${addDays(today(), 120)}" value="${form.shipDate}">
+        <span class="notice" id="notice-line"></span>
+      </label>
       ${team === "sales" ? `<div class="field"><span class="label">Is this inside the customer's forecast (±10%)?</span>
         <div class="seg" id="flex"><button type="button" data-flex="inside">Yes</button><button type="button" data-flex="outside">No, it's extra</button></div>
       </div>` : ""}
@@ -244,21 +308,24 @@ function requestView(team, store, state) {
   function paint() {
     const lane = laneFor(t.kind, form.destination);
     $("#loads").textContent = form.loads;
-    document.querySelectorAll("#week button").forEach((b) => b.classList.toggle("on", +b.dataset.week === form.week));
     document.querySelectorAll("#flex button").forEach((b) => b.classList.toggle("on", b.dataset.flex === form.flex));
-    $("#tag").innerHTML = priceTag(lane, form.week, form.loads, team);
+    if (!form.shipDate || form.shipDate < today()) form.shipDate = today();
+    $("#ship").value = form.shipDate;
+    const n = notice();
+    $("#notice-line").innerHTML = `${fmtDate(form.shipDate)} · <strong>${noticeText(n)}</strong>${n < SHORT_NOTICE_DAYS ? " (short notice)" : ""}`;
+    $("#tag").innerHTML = priceTag(lane, n, form.loads, team);
   }
 
   function mount() {
     $("#dest").addEventListener("change", (e) => { form.destination = e.target.value; paint(); });
+    $("#ship").addEventListener("change", (e) => { form.shipDate = e.target.value; paint(); });
     $("#app").addEventListener("click", async (e) => {
       const b = e.target.closest("button");
       if (!b) return;
       if (b.dataset.step) form.loads = Math.min(200, Math.max(1, form.loads + +b.dataset.step));
       else if (b.dataset.loads) form.loads = +b.dataset.loads;
-      else if (b.dataset.week) form.week = +b.dataset.week;
       else if (b.dataset.flex) form.flex = b.dataset.flex;
-      else if (b.dataset.useWeek) form.week = +b.dataset.useWeek;
+      else if (b.dataset.useDate) form.shipDate = b.dataset.useDate;
       else if (b.id === "send") return send(b);
       else if (b.dataset.move) return moveLater(b);
       else return;
@@ -270,8 +337,9 @@ function requestView(team, store, state) {
   async function send(btn) {
     const lane = laneFor(t.kind, form.destination);
     const row = {
-      team, kind: t.kind, destination: form.destination, loads: form.loads, week: form.week,
-      flex: team === "sales" ? form.flex : null, ...price(lane, form.week),
+      team, kind: t.kind, destination: form.destination, loads: form.loads,
+      ship_date: form.shipDate, notice_days: notice(),
+      flex: team === "sales" ? form.flex : null, ...price(lane, notice()),
     };
     btn.disabled = true;
     try {
@@ -291,8 +359,9 @@ function requestView(team, store, state) {
     if (!lane) return;
     btn.disabled = true;
     try {
-      await store.update(r.id, { week: 1, ...price(lane, 1) });
-      toast("Moved to next week.");
+      const date = addDays(today(), SHORT_NOTICE_DAYS);
+      await store.update(r.id, { ship_date: date, notice_days: SHORT_NOTICE_DAYS, ...price(lane, SHORT_NOTICE_DAYS) });
+      toast(`Moved to ${fmtDate(date)}.`);
       state.refresh();
     } catch (err) {
       toast("Couldn't update: " + err.message, true);
@@ -301,14 +370,15 @@ function requestView(team, store, state) {
   }
 
   function live(rows) {
+    paint();
     const mine = rows.filter((r) => r.team === team);
     $("#mine").innerHTML = mine.length
       ? mine.map((r) => {
           const lane = laneFor(r.kind, r.destination);
           let action = "";
-          if (lane && r.week === 0 && r.status === "new") {
-            const save = (price(lane, 1).profit_per_truck - r.profit_per_truck) * r.loads;
-            if (save > 0) action = `<div class="card-actions"><button type="button" class="util" data-move="${esc(r.id)}">Move to next week · save ${money(save)}</button></div>`;
+          if (lane && noticeOf(r) < SHORT_NOTICE_DAYS && r.status === "new") {
+            const save = (price(lane, SHORT_NOTICE_DAYS).profit_per_truck - price(lane, noticeOf(r)).profit_per_truck) * r.loads;
+            if (save > 0) action = `<div class="card-actions"><button type="button" class="util" data-move="${esc(r.id)}">Move to ${fmtDate(addDays(today(), SHORT_NOTICE_DAYS))} · save ${money(save)}</button></div>`;
           }
           return card(r, action);
         }).join("")
@@ -323,21 +393,76 @@ function logisticsView(store, state) {
       <p class="eyebrow">Logistics</p>
       <h1>Book the trucks</h1>
       <p class="lede">Every team's requests land here. Book a contract truck (cheaper, set in advance) when you can. Mark "Needs spot" when you have to buy a last-minute truck. <a href="?role=how">How it works</a></p>
+      <a class="guide-link" href="#quote"><strong>Got a spot quote?</strong> Enter it so every team sees the real price ↓</a>
       <div id="incoming" class="cards"></div>
+    </section>
+    <section class="panel" id="quote">
+      <h2>Got a spot quote? Enter it here</h2>
+      <p class="lede">Type the price a spot carrier quoted you. Every team's price tag for that lane updates right away.</p>
+      <label class="field"><span class="label">Lane</span>
+        <select id="q-lane">${LANES.map((l) => `<option value="${esc(laneKey(l))}">${esc(l.destination)} (${l.kind === "order" ? "customer" : "transfer"})</option>`).join("")}</select>
+      </label>
+      <label class="field"><span class="label">Spot truck price, per truck</span>
+        <span class="money-input"><span>$</span><input id="q-price" type="number" inputmode="numeric" min="0" max="20000" step="1"></span>
+      </label>
+      <p class="small" id="q-hint"></p>
+      <div class="card-actions">
+        <button type="button" id="q-save" class="util on">Update price</button>
+        <button type="button" id="q-clear" class="util">Use 2026 average</button>
+      </div>
     </section>
     <section class="panel">
       <details>
-        <summary>Lane price list (Findlay, 2026 data)</summary>
+        <summary>Lane price list (Findlay)</summary>
         <div class="table-wrap"><table class="prices">
-          <thead><tr><th>Lane</th><th>Trucks that go spot</th><th>Contract truck</th><th>Extra for a spot truck</th></tr></thead>
-          <tbody>${LANES.map((l) => `<tr><th scope="row">${esc(l.destination)} <span class="kind">${l.kind === "order" ? "Customer" : "Transfer"}</span></th>
-            <td>${pct(l.spot_share)}</td><td>${l.kind === "transfer" ? money(l.contract_cost) : "In price"}</td><td>${money(l.spot_premium)}</td></tr>`).join("")}</tbody>
+          <thead><tr><th>Lane</th><th>Trucks that go spot</th><th>Contract truck</th><th>Spot truck</th></tr></thead>
+          <tbody id="price-rows"></tbody>
         </table></div>
-        <p class="small">Logistics owns this list and updates it from contract rates and each lane's spot history.</p>
+        <p class="small">Contract and spot prices are 2026 averages unless Logistics entered a quote today.</p>
       </details>
     </section>`;
 
+  const pickLane = () => {
+    const [kind, dest] = $("#q-lane").value.split("|");
+    return { kind, dest, lane: laneFor(kind, dest), base: baseLane(kind, dest) };
+  };
+  function fillQuote() {
+    const { lane, base } = pickLane();
+    $("#q-price").value = lane.quote ?? avgSpot(base);
+    paintHint();
+  }
+  function paintHint() {
+    const { lane, base } = pickLane();
+    $("#q-hint").innerHTML = lane.quote != null
+      ? `Using <strong>today's quote: ${money(lane.quote)}</strong>. The 2026 average is ${money(avgSpot(base))}. Contract truck: ${money(base.contract_cost)}.`
+      : `Using the <strong>2026 average: ${money(avgSpot(base))}</strong>. Contract truck: ${money(base.contract_cost)}.`;
+    $("#price-rows").innerHTML = LANES.map((b) => {
+      const l = laneFor(b.kind, b.destination);
+      return `<tr><th scope="row">${esc(l.destination)} <span class="kind">${l.kind === "order" ? "Customer" : "Transfer"}</span></th>
+        <td>${pct(l.spot_share)}</td><td>${money(l.contract_cost)}</td>
+        <td>${l.quote != null ? `<strong>${money(l.quote)}</strong> <span class="kind">today's quote</span>` : money(avgSpot(l))}</td></tr>`;
+    }).join("");
+  }
+  async function saveQuote(clear) {
+    const { kind, dest, base } = pickLane();
+    const value = Math.round(Number($("#q-price").value));
+    if (!clear && !(value >= 0 && value <= 20000)) return toast("Enter a price between $0 and $20,000.", true);
+    try {
+      if (clear) await store.clearQuote(kind, dest);
+      else await store.setQuote(kind, dest, value);
+      toast(clear ? `Back to the 2026 average for ${dest}.` : `Spot price for ${dest} is now ${money(value)} on every screen.`);
+      if (clear) $("#q-price").value = avgSpot(base);
+      await state.refresh();
+    } catch (err) {
+      toast("Couldn't update: " + err.message, true);
+    }
+  }
+
   function mount() {
+    $("#q-lane").addEventListener("change", fillQuote);
+    $("#q-save").addEventListener("click", () => saveQuote(false));
+    $("#q-clear").addEventListener("click", () => saveQuote(true));
+    fillQuote();
     $("#app").addEventListener("click", async (e) => {
       const b = e.target.closest("button[data-status]");
       if (!b) return;
@@ -353,6 +478,7 @@ function logisticsView(store, state) {
   }
 
   function live(rows) {
+    paintHint();
     const order = { new: 0, spot: 1, contract: 2 };
     const sorted = [...rows].sort((a, b) => order[a.status] - order[b.status]);
     $("#incoming").innerHTML = sorted.length
@@ -429,10 +555,10 @@ function carrierView() {
 }
 
 function howView() {
-  const lane = laneFor("transfer", "Mississauga, ON");
+  const lane = baseLane("transfer", "Mississauga, ON");
   const loads = 10;
-  const now = price(lane, 0);
-  const later = price(lane, 1);
+  const now = price(lane, 3);
+  const later = price(lane, SHORT_NOTICE_DAYS);
   const save = (later.profit_per_truck - now.profit_per_truck) * loads;
   const tag = (p) => `<span class="mini mini-${p.color}">${money(p.profit_per_truck)} · ${p.color[0].toUpperCase() + p.color.slice(1)}</span>`;
   const html = `<section class="panel how">
@@ -466,11 +592,11 @@ function howView() {
       <p>Inventory Planning wants to move ${loads} truckloads of cans from Findlay to ${esc(lane.destination)}.</p>
       <ol class="steps">
         <li><strong>A truck to move the cans</strong> costs ${money(lane.contract_cost)} on a contract truck.</li>
-        <li><strong>Shipping this week?</strong> That's too late to book a contract truck, so we count a spot truck: <strong>+${money(lane.spot_premium)}</strong>.<br>
+        <li><strong>Shipping in 3 days?</strong> Under a week's notice is too late to book a contract truck, so we count a spot truck: <strong>+${money(lane.spot_premium)}</strong>.<br>
           ${money(PROFIT_PER_TRUCK)} − ${money(now.extra_cost)} = ${tag(now)}</li>
-        <li><strong>Shipping next week?</strong> Only ${pct(lane.spot_share)} of trucks on this lane end up spot, so the risk is ${pct(lane.spot_share)} × ${money(lane.spot_premium)} = <strong>+${money(later.spot_risk)}</strong>.<br>
+        <li><strong>Shipping a week or more out?</strong> Only ${pct(lane.spot_share)} of trucks on this lane end up spot, so the risk is ${pct(lane.spot_share)} × ${money(lane.spot_premium)} = <strong>+${money(later.spot_risk)}</strong>.<br>
           ${money(PROFIT_PER_TRUCK)} − ${money(later.extra_cost)} = ${tag(later)}</li>
-        <li><strong>Waiting one week saves ${money(save)}</strong> on ${loads} loads. The app shows this before anyone decides.</li>
+        <li><strong>Planning a week ahead saves ${money(save)}</strong> on ${loads} loads. The app shows this before anyone decides.</li>
       </ol>
 
       <h2>What the colors mean</h2>
@@ -486,15 +612,15 @@ function howView() {
         <tr><th>Sales</th><td>Checks the price before saying yes to extra customer loads.</td></tr>
         <tr><th>Production</th><td>Checks the price before an extra run that has to be trucked to a warehouse.</td></tr>
         <tr><th>Inventory Planning</th><td>Checks the price before moving cans between sites.</td></tr>
-        <tr><th>Logistics</th><td>Sees every request early and books contract trucks.</td></tr>
+        <tr><th>Logistics</th><td>Sees every request early, books contract trucks, and types in real spot quotes so every price tag is current.</td></tr>
         <tr><th>Live Hub</th><td>Everyone sees the same requests and totals as they happen.</td></tr>
         <tr><th>Carriers</th><td>Get a 4-week look ahead so they can hold trucks for Ball.</td></tr>
       </tbody></table>
 
       <details class="source"><summary>Where the numbers come from</summary>
         <p>Ball's case workbook (Detail sheet), Findlay plant, January–July 2026, with short yard moves (shuttles) left out.
-        "Trucks that go spot" is the share of a lane's loads that went on spot trucks. "Extra for a spot truck" is the lane's average spot cost minus its average contract cost.
-        "This week" counts as a spot truck because the data is monthly and can't show how much notice each load had. That's an assumption.</p>
+        "Trucks that go spot" is the share of a lane's loads that went on spot trucks. The spot price starts at the lane's 2026 average. When Logistics gets a real quote from a spot carrier, they type it in and every team's price tag uses it instead.
+        Less than 7 days' notice counts as a spot truck because the data is monthly and can't show how much notice each load had. That's an assumption.</p>
       </details>
 
       <a class="cta" href="./">Try it: pick a team</a>
@@ -534,16 +660,29 @@ async function main() {
   view.mount?.();
 
   let busy = false;
+  let again = false;
+  let loaded = false;
   state.refresh = async () => {
-    if (!view.live || busy) return;
+    if (!view.live) return;
+    if (busy) { again = true; return; }
     busy = true;
     try {
-      state.rows = await store.list();
+      const [rows, quotes] = await Promise.all([store.list(), store.quotes().catch(() => [])]);
+      const next = new Map(quotes.map((q) => [`${q.kind}|${q.destination}`, q]));
+      if (loaded && team !== "logistics") {
+        for (const [key, q] of next) {
+          if (QUOTES.get(key)?.quote !== q.quote) toast(`Logistics updated the spot price to ${q.destination}: ${money(q.quote)}`);
+        }
+      }
+      QUOTES = next;
+      loaded = true;
+      state.rows = rows;
       view.live(state.rows);
     } catch (err) {
       toast("Can't reach the hub: " + err.message, true);
     } finally {
       busy = false;
+      if (again) { again = false; state.refresh(); }
     }
   };
   if (view.live) {

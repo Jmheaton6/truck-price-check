@@ -211,3 +211,24 @@ details[open] summary { margin-bottom: 10px; }
 .who td { text-align: left; white-space: normal; }
 .source { margin: 24px 0; font-size: 14px; color: var(--muted); }
 .source summary { font-size: 17px; color: var(--ink); }
+
+/* ---------- Spot quotes ---------- */
+.source-line { font-size: 13px; color: var(--muted); margin-top: 8px; }
+.source-line.quoted { color: var(--ink); }
+.money-input { display: flex; align-items: center; gap: 8px; }
+.money-input span { font: 400 26px var(--serif); }
+.money-input input {
+  width: 100%; font: 400 26px var(--serif); color: var(--ink);
+  padding: 10px 14px; border-radius: 10px; border: 1px solid #cfccc4; background: var(--cream);
+}
+
+/* ---------- Ship date ---------- */
+input[type="date"] {
+  width: 100%; font: 500 17px var(--sans); color: var(--ink); min-height: 50px;
+  padding: 12px 14px; border-radius: 10px; border: 1px solid #cfccc4; background: var(--cream);
+  -webkit-appearance: none; appearance: none;
+}
+.notice { display: block; margin-top: 8px; font-size: 15px; }
+
+#quote { scroll-margin-top: 70px; }
+.panel .guide-link { background: var(--cream); margin: 0 0 16px; }

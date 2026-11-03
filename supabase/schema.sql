@@ -1,5 +1,6 @@
 -- Truck Price Check: run once in Supabase → SQL Editor → New query → Run.
--- Then set your reset PIN with the last statement (change 1234 first).
+-- Then set your reset PIN with the last statement (change 1234 first),
+-- and run update-2.sql for spot quotes.
 
 create table if not exists public.requests (
   id               bigint generated always as identity primary key,
@@ -8,7 +9,9 @@ create table if not exists public.requests (
   kind             text not null check (kind in ('order', 'transfer')),
   destination      text not null check (char_length(destination) <= 60),
   loads            int  not null check (loads between 1 and 200),
-  week             int  not null check (week between 0 and 3),
+  week             int,                -- legacy; ship_date replaces it
+  ship_date        date,
+  notice_days      int check (notice_days between 0 and 366),
   spot_chance      numeric not null check (spot_chance between 0 and 1),
   extra_cost       int  not null,
   profit_per_truck int  not null,
@@ -30,7 +33,7 @@ create policy "anyone can update" on public.requests for update to anon, authent
 
 revoke all on public.requests from anon, authenticated;
 grant select, insert on public.requests to anon, authenticated;
-grant update (status, week, spot_chance, extra_cost, profit_per_truck, color) on public.requests to anon, authenticated;
+grant update (status, week, ship_date, notice_days, spot_chance, extra_cost, profit_per_truck, color) on public.requests to anon, authenticated;
 grant usage, select on all sequences in schema public to anon, authenticated;
 
 -- Live updates for the hub and the Logistics screen.
