@@ -293,3 +293,14 @@ input:hover, select:hover { border-color: var(--muted); }
 .f-t { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); }
 .f-changed { border-color: var(--teal); background: var(--white); }
 .cal-head h1.ol-h { min-width: 0; text-align: left; }
+
+/* ---------- Portal switch ---------- */
+.who { display: flex; align-items: center; gap: 14px; }
+.switch { display: flex; padding: 3px; border-radius: 999px; background: rgba(255,255,255,.12); }
+.switch a { color: rgba(255,255,255,.8); text-decoration: none; font-weight: 600; font-size: 14px; padding: 6px 14px; border-radius: 999px; white-space: nowrap; }
+.switch a:hover { color: var(--white); }
+.switch a.on { background: var(--white); color: var(--ink); }
+body[data-portal="customer"] .switch { background: var(--cream); }
+body[data-portal="customer"] .switch a { color: var(--muted); }
+body[data-portal="customer"] .switch a:hover { color: var(--ink); }
+body[data-portal="customer"] .switch a.on { background: var(--teal); color: var(--white); }

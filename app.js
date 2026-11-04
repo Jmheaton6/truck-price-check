@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=36";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=36";
+import * as E from "./engine.js?v=37";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=37";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -789,13 +789,17 @@ async function main() {
     dept: TEAMS.includes(asked) ? asked : asked === "logistics" || ((role === "calendar" || role === "transfers" || role === "outlook") && !savedDept) ? "logistics"
       : role === "exec" && !savedDept ? "exec" : DEPT[savedDept] ? savedDept : "sales",
     company: SIM_CUSTOMERS[localStorage.getItem("bc_company")] ? localStorage.getItem("bc_company") : "Cincinnati, OH" };
-  if (portal === "ball") localStorage.setItem("bc_dept", state.dept);
+  if (portal === "ball") { localStorage.setItem("bc_dept", state.dept); localStorage.setItem("bc_tab", role); }
 
   $("#brand").textContent = portal === "customer" ? "Customer HQ" : portal === "ball" ? "Ball HQ" : "Ball · Findlay pilot";
   $("#brand").href = portal === "customer" ? link("customer") : "./" + link("").replace(/^\?role=&?/, "?").replace(/^\?$/, "");
-  $("#who").innerHTML = portal === "customer"
+  // One click between the two portals; Ball HQ reopens the tab you were last on.
+  const ballTab = BALL[localStorage.getItem("bc_tab")] ? localStorage.getItem("bc_tab") : "orders";
+  const switcher = portal === "home" ? "" : `<nav class="switch" aria-label="Switch portal">
+    <a href="${link("customer")}" class="${portal === "customer" ? "on" : ""}">Customer HQ</a><a href="${link(ballTab)}" class="${portal === "ball" ? "on" : ""}">Ball HQ</a></nav>`;
+  $("#who").innerHTML = switcher + (portal === "customer"
     ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>`
-    : portal === "ball" ? `<select id="who-sel" aria-label="Department">${Object.entries(DEPT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` : "";
+    : portal === "ball" ? `<select id="who-sel" aria-label="Department">${Object.entries(DEPT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` : "");
 
   const store = withForecasts(await makeStore());
   const drawNav = (items = []) => {
