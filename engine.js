@@ -77,7 +77,7 @@ export const trucksFromCans = (cans) => Math.max(1, Math.ceil(cans / RULES.cansP
 // transfer: Ball moving its own cans to a warehouse. data { destination, trucks, date, pattern, booked{day:ts} }; status booked
 // ask:      Logistics asked a lane's carrier for +N. data { kind, destination, week, date, trucks, accepted }; status yes|part|no
 export const TEAMS = ["sales", "inventory", "production", "logistics"];
-export const isActive = (it) => !(it.type === "order" && it.status === "declined");
+export const isActive = (it) => it.status !== "declined"; // a denied order or a removed transfer moves nothing
 const shipsTrucks = (it) => (it.type === "order" || it.type === "transfer") && isActive(it);
 export const itemLane = (it) =>
   it.type === "order" ? laneOf("order", it.data.customer)
@@ -150,7 +150,7 @@ export const overspend = (lane, spot) => spot * lane.spot_premium;
 // no carrier asks, transfers all on one day.
 export function allocate(items, now, opts = {}) {
   const list = items.filter((it) => opts.oldWay
-    ? (it.type === "order" && !it.data.retry_of && it.status !== "waiting") || it.type === "transfer"
+    ? (it.type === "order" && !it.data.retry_of && it.status !== "waiting") || (it.type === "transfer" && isActive(it))
     : shipsTrucks(it)).sort(byCreated);
   const extras = opts.oldWay ? new Map() : carrierExtras(items, now);
   const usedWeek = new Map();
@@ -345,7 +345,7 @@ export function toBook(items, now) {
 // Spot and savings on the pilot's own freight (accepted orders and transfers) vs. the same freight the old way.
 export function totals(items, now, opts = {}) {
   const alloc = allocate(items, now, opts);
-  const counted = (it) => it.type === "transfer" || (it.type === "order" && (opts.oldWay ? it.status !== "waiting" && !it.data.retry_of : it.status === "confirmed"));
+  const counted = (it) => (it.type === "transfer" && isActive(it)) || (it.type === "order" && (opts.oldWay ? it.status !== "waiting" && !it.data.retry_of : it.status === "confirmed"));
   const t = { trucks: 0, contract: 0, spot: 0, overspend: 0 };
   for (const it of items) {
     const a = alloc.get(it.id);
@@ -380,4 +380,21 @@ export function scorecards(items, now) {
     production: { used, open, share: used / open },
     logistics: { spotShare: now_.spotShare, trucks: now_.trucks, spot: now_.spot, ahead: days ? ahead / days : null, bookedDays: days },
   };
+}
+
+// The same work, one row per order or transfer: every accepted truck day not booked yet, soonest first.
+export function toBookItems(items, now) {
+  const alloc = allocate(items, now);
+  const out = [];
+  for (const it of items) {
+    const ready = it.type === "transfer" ? isActive(it) : it.type === "order" && it.status === "confirmed" && it.data.trucks > 0;
+    const a = ready && alloc.get(it.id);
+    if (!a) continue;
+    const days = a.days.filter((d) => !d.booked);
+    if (!days.length) continue;
+    out.push({ it, lane: a.lane, days, first: days[0].day, last: days.at(-1).day,
+      trucks: days.reduce((s, d) => s + d.n, 0), contract: days.reduce((s, d) => s + d.contract, 0), spot: days.reduce((s, d) => s + d.spot, 0),
+      bookBy: addDays(days[0].day, -RULES.noticeDays) });
+  }
+  return out.sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : 0));
 }

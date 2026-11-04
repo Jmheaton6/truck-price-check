@@ -1,26 +1,16 @@
-import * as E from "./engine.js?v=25";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=25";
+import * as E from "./engine.js?v=30";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=30";
 
-const { RULES, PILOT_LANES, SIM_CUSTOMERS, SIM_LINE_TIME, PATTERNS, TEAMS, QUESTIONS, STAGES } = E;
+const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
 const NOW = PARAMS.get("today") || E.isoDate(new Date()); // ?today=2026-11-05 to rehearse a date
 const FORCE_LOCAL = PARAMS.has("local");                   // ?local = backup if the room's Wi-Fi fails
 
-// Ball HQ: one shared board, one tab per department, and the plant manager's dashboard.
-const BALL_TABS = { pos: "All POs", sales: "Sales", inventory: "Inventory", production: "Production", logistics: "Logistics", dashboard: "Dashboard" };
-const LOG_TABS = { signoff: "Sign-offs", book: "Book trucks", outlook: "6-week outlook", transfers: "Transfers" };
-const ALIASES = { review: ["pos"], team: ["pos"], hub: ["dashboard"], planning: ["production"],
-  schedule: ["logistics", "book"], carrier: ["logistics", "book"], outlook: ["logistics", "outlook"], plan: ["logistics", "outlook"], transfers: ["logistics", "transfers"] };
-const TEAM_NAME = { sales: "Sales", inventory: "Inventory", production: "Production", logistics: "Logistics", management: "Management" };
-const HOME_TAB = { sales: "sales", inventory: "inventory", production: "production", logistics: "logistics", management: "dashboard" };
-const DEPT = {
-  sales: "Sales owns the customer. Check each PO against what the customer forecast, and answer the customer when a team says no: offer a better date, accept anyway, or decline.",
-  inventory: "Check whether the customer's labeled cans are already in stock at Findlay, and flag cuts that would leave made cans stranded.",
-  production: "Check whether Findlay has the line time to make the cans before the production freeze.",
-  logistics: "Check whether a PO fits on contract trucks, ask carriers for more ahead of time, and book the trucks once a PO is accepted. Spot is for emergencies only.",
-};
-const REASONS = ["Promotion", "Filling-line change", "Demand up", "Demand down"];
-const SPOT_REASONS = ["Customer's line would go down", "Carrier said no", "Under 3 days' notice", "Accepted as an exception"];
+const BALL = { orders: "Orders", calendar: "Trucks", transfers: "Transfers", exec: "Executive" };
+const ALIASES = { review: "orders", pos: "orders", team: "orders", ball: "orders", sales: "orders", inventory: "orders", production: "orders",
+  logistics: "calendar", schedule: "calendar", outlook: "calendar", carrier: "calendar", plan: "calendar", hub: "exec", dashboard: "exec" };
+const DEPT = { sales: "Sales", inventory: "Inventory", production: "Production", logistics: "Logistics", exec: "Executive" };
+const LAST_DAY = E.addDays(E.weekKey(NOW), RULES.weeks * 7 - 1);
 
 // ---------- Data store: Supabase when configured, this browser otherwise ----------
 async function makeStore() {
@@ -40,7 +30,7 @@ async function makeStore() {
       },
     };
   }
-  const KEY = "bc_items_v2";
+  const KEY = "bc_items_v3";
   const listeners = [];
   const read = () => JSON.parse(localStorage.getItem(KEY) || "[]");
   const write = (rows) => { localStorage.setItem(KEY, JSON.stringify(rows)); listeners.forEach((f) => f()); };
@@ -48,902 +38,458 @@ async function makeStore() {
   return {
     live: false,
     list: async () => read(),
-    add: async (row) => {
-      const saved = { ...row, id: Date.now() * 10 + (seq++ % 10), created_at: new Date().toISOString() };
-      write([...read(), saved]);
-      return saved;
-    },
-    update: async (id, patch) => write(read().map((r) => (r.id === id ? { ...r, ...patch } : r))),
+    add: async (row) => { const saved = { ...row, id: Date.now() * 10 + (seq++ % 10), created_at: new Date().toISOString() }; write([...read(), saved]); return saved; },
+    update: async (id, patch) => write(read().map((r) => (String(r.id) === String(id) ? { ...r, ...patch } : r))),
     reset: async () => write([]),
-    subscribe(cb) {
-      listeners.push(cb);
-      addEventListener("storage", (e) => e.key === KEY && cb());
-    },
+    subscribe(cb) { listeners.push(cb); addEventListener("storage", (e) => e.key === KEY && cb()); },
   };
 }
-
-// ---------- Who is using this laptop (no passwords: name + team, or name + company) ----------
-const ME_KEY = { ball: "bc_me_ball", customer: "bc_me_cust" };
-let ME = null;
-const loadMe = (portal) => { try { return JSON.parse(localStorage.getItem(ME_KEY[portal])); } catch { return null; } };
-const saveMe = (portal, me) => localStorage.setItem(ME_KEY[portal], JSON.stringify(me));
-const mine = (team) => ME?.team === team;
-const nowIso = () => new Date().toISOString();
-const entry = (ev, cust) => ({ at: nowIso(), by: ME.name, tm: ME.team || "customer", ev, ...(cust ? { cust } : {}) });
 
 // ---------- Helpers ----------
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const money = (n) => (n < 0 ? "−$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US");
 const pct = (x) => Math.round(x * 100) + "%";
-const num = (n) => Math.round(n).toLocaleString("en-US");
-const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-const stamp = (iso) => new Date(iso).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
+const nowIso = () => new Date().toISOString();
 const fmtDate = (iso) => E.atNoon(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 const fmtShort = (iso) => E.atNoon(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const dow = (iso) => E.atNoon(iso).toLocaleDateString("en-US", { weekday: "short" });
 const weekLabel = (sun) => {
   const sat = E.addDays(sun, 6);
   return E.atNoon(sun).getMonth() === E.atNoon(sat).getMonth() ? `${fmtShort(sun)}–${E.atNoon(sat).getDate()}` : `${fmtShort(sun)}–${fmtShort(sat)}`;
 };
 const plural = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
-const ago = (iso) => {
-  const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
-  return m < 1 ? "just now" : m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} hr` : `${Math.round(m / 1440)} days`;
-};
-const LAST_DAY = E.addDays(E.weekKey(NOW), RULES.weeks * 7 - 1);
+const millions = (trucks) => +(trucks * RULES.cansPerTruck / 1e6).toFixed(1);
+const fromMillions = (m) => Math.max(0, Math.round((+m || 0) * 1e6 / RULES.cansPerTruck));
 function link(role, extra = {}) {
-  const q = new URLSearchParams({ role, ...extra });
-  if (FORCE_LOCAL) q.set("local", "");
-  if (PARAMS.get("today")) q.set("today", PARAMS.get("today"));
-  return "?" + q.toString().replace("local=&", "local&").replace(/local=$/, "local");
+  let s = "?" + new URLSearchParams({ role, ...extra }).toString();
+  if (FORCE_LOCAL) s += "&local";
+  if (PARAMS.get("today")) s += `&today=${PARAMS.get("today")}`;
+  return s;
 }
-const custName = (dest) => `${SIM_CUSTOMERS[dest].name} · ${dest}`;
-const laneName = (lane) => `Findlay → ${lane.destination}`;
-const chips = (contract, spot) =>
-  `${contract ? `<span class="b b-contract">${contract}</span> contract ` : ""}${spot ? `<span class="b b-spot">${spot}</span> spot` : ""}`;
 const byId = (items, id) => items.find((x) => String(x.id) === String(id));
 const orders = (items) => items.filter((x) => x.type === "order");
 const isChange = (it) => it.data.kind === "change";
 const changesOf = (items, po) => orders(items).filter((x) => isChange(x) && String(x.data.parent) === String(po.id));
-// A PO's total on its date: the PO plus accepted changes for that same date (a change moved to another date ships on its own).
-const poTotal = (items, po) => po.data.trucks + changesOf(items, po).filter((c) => c.status === "confirmed" && E.dateOf(c) === E.dateOf(po)).reduce((s, c) => s + c.data.trucks, 0);
-const stagePill = (it) => `<span class="status st-${E.stageOf(it)}">${STAGES[E.stageOf(it)]}</span>`;
-
+// A PO's total on its date: the PO plus accepted changes for that date.
+const poTotal = (items, po) => po.data.trucks + changesOf(items, po)
+  .filter((c) => c.status === "confirmed" && c.data.date === po.data.date).reduce((s, c) => s + c.data.trucks, 0);
+const custName = (dest) => SIM_CUSTOMERS[dest].name;
 const ICONS = {
   check: '<path d="M4.5 10.5l3.5 3.5 7.5-8"/>',
   x: '<path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>',
-  dot: '<circle cx="10" cy="10" r="4.5"/>',
-  arrow: '<path d="M3.5 10h12M11 5.5l4.5 4.5-4.5 4.5"/>',
-  back: '<path d="M16.5 10h-12M9 5.5L4.5 10 9 14.5"/>',
-  lock: '<rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 016 0V9"/>',
+  left: '<path d="M12.5 4.5L7 10l5.5 5.5"/>',
+  right: '<path d="M7.5 4.5L13 10l-5.5 5.5"/>',
 };
 const icon = (name) => `<svg class="ic ic-${name}" viewBox="0 0 20 20" aria-hidden="true">${ICONS[name]}</svg>`;
-const actAs = (team) => `<button type="button" class="linkish" data-act-as="${team}">Act as ${TEAM_NAME[team]}</button>`;
-const locked = (team) => (mine(team) ? "" : ` disabled title="${TEAM_NAME[team]} only. Use “Act as ${TEAM_NAME[team]}”."`);
+const stageChip = (it, forCustomer = false) => {
+  const st = E.stageOf(it);
+  const label = st === "checking" && !forCustomer ? `${TEAMS.filter((t) => it.data.signoffs?.[t]?.ok).length}/4 accepted` : STAGES[st];
+  return `<span class="chip chip-${st}">${label}</span>`;
+};
+// What a customer reads when a department says no.
+const CUSTOMER_WHY = { sales: "Over your forecast", inventory: "Cans already made", production: "No line time that week", logistics: "No trucks that day" };
 
 function toast(msg, bad = false) {
   document.querySelectorAll(".toast").forEach((x) => x.remove());
   const t = document.createElement("div");
   t.className = "toast" + (bad ? " toast-bad" : "");
+  t.setAttribute("role", "status");
   t.textContent = msg;
   document.body.append(t);
-  setTimeout(() => t.remove(), 3200);
+  setTimeout(() => t.remove(), 3000);
 }
-
-const sourceNote = () => `<p class="provenance"><strong>Real</strong> (Ball's 2026 workbook, Findlay, Jan–Jul, no shuttles): lanes, contract trucks a week, contract and spot prices.
-  <strong>Simulated</strong> for the pilot: trucks already booked, customers and their forecasts, stock, line time, and the carrier's answers.</p>`;
-
-// One line that says what a PO or change is.
-function whatLine(items, it) {
-  const n = Math.abs(it.data.trucks);
-  const cans = num(Math.abs(it.data.cans || n * RULES.cansPerTruck));
-  if (!isChange(it)) return `New PO: <strong>${plural(n, "truckload")}</strong> (${cans} cans) for <strong>${esc(fmtDate(E.dateOf(it)))}</strong>`;
-  const po = byId(items, it.data.parent);
-  const before = po ? poTotal(items, po) - (it.status === "confirmed" ? it.data.trucks : 0) : null;
-  const date = it.status === "offered" ? it.data.date : E.dateOf(it); // show the asked-for date until the customer accepts
-  return `Change: <strong>${it.data.trucks > 0 ? "+" : "−"}${plural(n, "truckload")}</strong> (${cans} cans)${before != null ? `, ${before} → ${before + it.data.trucks}` : ""} for <strong>${esc(fmtDate(date))}</strong>`;
+function showBroken(msg) {
+  const el = $("#mode-banner");
+  if (!el) return;
+  el.hidden = false;
+  el.classList.add("banner-bad");
+  el.textContent = `Something went wrong (${msg}). Reload with Cmd+Shift+R.`;
 }
+addEventListener("error", (e) => showBroken(e.message));
+addEventListener("unhandledrejection", (e) => showBroken(e.reason?.message || String(e.reason)));
+if (typeof E.calendar !== "function") showBroken("old copy of the app");
 
-// The history of one PO or change. Old rows without a log get their first line rebuilt.
-function logOf(it) {
-  const log = it.data.log?.length ? it.data.log : [{ at: it.created_at, by: it.data.by?.name || "Customer", tm: "customer", ev: isChange(it) ? "Requested a change" : "Sent the PO" }];
-  return [...log].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-}
-const whoLabel = (it, e) => e.tm === "system" ? "Ball HQ" : e.tm === "customer" ? `${esc(e.by)} (${esc(SIM_CUSTOMERS[it.data.customer]?.name || "customer")})` : `${esc(e.by)} (${TEAM_NAME[e.tm] || esc(e.tm)})`;
-
-// What a team must do on this PO right now, or null.
-function needs(it, team) {
-  const st = E.stageOf(it);
-  const so = it.data.signoffs || {};
-  if (st === "review" && !so[team]) return "Needs your answer";
-  if (team === "sales" && st === "review" && TEAMS.some((t) => so[t]?.ok === false)) return "A team said no: answer the customer";
-  if (team === "logistics" && st === "accepted") return "Accepted: book the trucks";
-  return null;
-}
-const teamCount = (items, team) => orders(items).filter((it) => needs(it, team)).length;
-
-// ---------- Sign in ----------
-function signInView(portal) {
-  const prev = loadMe(portal) || {};
-  const ball = portal === "ball";
-  const pick = { team: prev.team || "sales", customer: prev.customer || localStorage.getItem("bc_customer") || "Cincinnati, OH" };
-  const html = `<section class="panel signin">
-      <h1>${ball ? "Sign in to Ball HQ" : "Sign in to Customer HQ"}</h1>
-      <p class="lede">${ball ? "Your name goes on every answer you give, so every team can see who decided what." : "Your name goes on every PO and reply you send Ball."}</p>
-      <label class="field"><span class="label">Your name</span><input id="si-name" type="text" autocomplete="name" maxlength="40" value="${esc(prev.name || "")}" placeholder="First and last name"></label>
-      ${ball ? `<div class="field"><span class="label">Your team</span>
-        <div class="seg" id="si-team">${Object.entries(TEAM_NAME).map(([k, v]) => `<button type="button" data-team="${k}">${v}</button>`).join("")}</div></div>`
-      : `<label class="field"><span class="label">Your company</span>
-        <select id="si-cust">${Object.keys(SIM_CUSTOMERS).map((d) => `<option value="${esc(d)}">${esc(custName(d))}</option>`).join("")}</select></label>`}
-      <button type="button" id="si-go" class="cta">Continue</button>
-    </section>`;
-  function paint() {
-    document.querySelectorAll("#si-team button").forEach((b) => b.classList.toggle("on", b.dataset.team === pick.team));
-    if ($("#si-cust")) $("#si-cust").value = pick.customer;
+// Truck squares: one per truck. Contract booked = solid, contract to book = outline, spot = red, not accepted = dashed.
+function squares(moves, max = 14) {
+  const parts = [];
+  for (const m of moves) {
+    for (let i = 0; i < m.contract; i++) parts.push(m.checking ? "chk" : m.booked ? "con" : "con-open");
+    for (let i = 0; i < m.spot; i++) parts.push(m.checking ? "chk" : "spot");
   }
-  function mount() {
-    paint();
-    $("#si-name").focus();
-    $("#si-team")?.addEventListener("click", (e) => { const b = e.target.closest("[data-team]"); if (b) { pick.team = b.dataset.team; paint(); } });
-    $("#si-cust")?.addEventListener("change", (e) => { pick.customer = e.target.value; });
-    const go = () => {
-      const name = $("#si-name").value.trim();
-      if (!name) { toast("Type your name first.", true); return $("#si-name").focus(); }
-      saveMe(portal, ball ? { name, team: pick.team } : { name, customer: pick.customer });
-      sessionStorage.removeItem("bc_switch");
-      if (ball && PARAMS.get("role") === "ball") location.href = link(HOME_TAB[pick.team]);
-      else location.reload();
-    };
-    $("#si-go").addEventListener("click", go);
-    $("#si-name").addEventListener("keydown", (e) => e.key === "Enter" && go());
-  }
-  return { html, mount };
+  const shown = parts.slice(0, max).map((k) => `<i class="sq sq-${k}"></i>`).join("");
+  return shown + (parts.length > max ? `<b class="sq-more">+${parts.length - max}</b>` : "");
 }
 
 // ---------- Customer HQ ----------
-const CUST_STEPS = ["Sent", "Ball reviews", "Accepted", "Trucks booked"];
-const CUST_AT = { review: 2, offered: 2, accepted: 3, booked: 4 };
-const weekName = (wk) => (wk === 0 ? `This week (${weekLabel(E.weekKey(NOW))})` : weekLabel(E.addDays(E.weekKey(NOW), wk * 7)));
-const millions = (trucks) => +(trucks * RULES.cansPerTruck / 1e6).toFixed(1);
-
 function customerView(store, state) {
-  const customer = ME.customer;
-  const form = {
-    mode: "po",                              // "po" or "outlook"
-    cans: 2000000, reason: "Promotion",
-    date: E.addDays(E.weekKey(NOW), 14 + 4), // Thursday, two weeks out
-    changeOf: null,                          // PO id when requesting a change
-    outlook: null,                           // truckloads per week while editing the outlook
-  };
+  const form = { m: 2, date: E.addDays(E.weekKey(NOW), 14 + 4), changeOf: null };
   const html = `<div class="cols cols-cust">
     <section class="panel" id="c-form"></section>
-    <div>
-      <section class="panel"><h2>Your POs</h2><div id="c-mine" class="cards"><p class="empty">Loading…</p></div></section>
-      <section class="panel" id="c-score"></section>
-    </div>
+    <section class="panel"><h2>My orders</h2><div id="c-mine" class="cards"><p class="empty">Loading…</p></div></section>
   </div>`;
-
-  const trucks = () => E.trucksFromCans(form.cans);
   const changing = () => (form.changeOf ? byId(state.items, form.changeOf) : null);
-  const fcNow = (wk) => E.forecastOf(state.items, customer, wk, NOW);
-  // The PO or change as it would be saved, so the engine can say what happens to it.
-  function draft() {
-    const po = changing();
-    const delta = po ? trucks() - poTotal(state.items, po) : trucks();
-    const data = po ? { kind: "change", parent: po.id, customer, trucks: delta, date: E.dateOf(po), signoffs: {} }
-      : { kind: "po", customer, trucks: trucks(), date: form.date, signoffs: {} };
-    return { id: "draft", type: "order", status: "waiting", created_at: "￿", data };
-  }
 
   function drawForm() {
     const po = changing();
-    const tabs = po ? "" : `<div class="seg c-mode" id="c-mode"><button type="button" data-mode="po">Place a PO</button><button type="button" data-mode="outlook">Share your 6-week outlook</button></div>`;
-    if (form.mode === "outlook" && !po) return drawOutlook(tabs);
-    const presets = [400000, 1000000, 2000000, 4000000];
-    const cansField = (label) => `<label class="field"><span class="label">${label}</span>
-        <input id="c-cans" type="number" inputmode="numeric" min="200000" max="20000000" step="200000">
-        <span class="presets presets-row">${presets.map((n) => `<button type="button" class="chip-btn" data-cans="${n}">${n >= 1e6 ? n / 1e6 + "M" : n / 1e3 + "K"}</button>`).join("")}</span>
-        <span class="notice" id="c-trucks"></span></label>`;
-    const reasons = `<div class="field"><span class="label">Why?</span>
-        <div class="seg" id="c-reason">${REASONS.map((r) => `<button type="button" data-reason="${esc(r)}">${esc(r)}</button>`).join("")}</div></div>`;
-    $("#c-form").innerHTML = po ? `
-      <h1>Change ${E.poNumber(state.items, po)}</h1>
-      <p class="lede">Today it's <strong>${plural(poTotal(state.items, po), "truckload")}</strong> for <strong>${esc(fmtDate(E.dateOf(po)))}</strong>.</p>
-      ${cansField("New total: how many cans?")}
-      ${reasons}
-      <div id="c-rules"></div>
-      <button type="button" id="c-send" class="cta">Send change request</button>
-      <button type="button" id="c-cancel" class="util quiet">Cancel</button>`
-      : `${tabs}
-      <h1>Place a PO with Ball</h1>
-      <p class="lede">Ordering for <strong>${esc(custName(customer))}</strong>.</p>
-      ${cansField("How many cans?")}
-      <label class="field"><span class="label">Delivery date</span>
-        <input id="c-date" type="date" min="${NOW}" max="${LAST_DAY}"></label>
-      ${reasons}
-      <div id="c-rules"></div>
-      <button type="button" id="c-send" class="cta">Send PO to Ball</button>`;
-    $("#c-cans").addEventListener("input", (e) => { form.cans = Math.max(1, +e.target.value || 0); paint(); });
-    $("#c-date")?.addEventListener("change", (e) => { form.date = e.target.value < NOW ? NOW : e.target.value > LAST_DAY ? LAST_DAY : e.target.value; paint(); });
+    $("#c-form").innerHTML = `
+      <h1>${po ? `Change ${E.poNumber(state.items, po)}` : "New order"}</h1>
+      <label class="field"><span class="label">${po ? "New total" : "Cans"}</span>
+        <span class="amount"><input id="c-m" type="number" min="0.2" max="40" step="0.2" inputmode="decimal" aria-label="Million cans"><span class="unit">million</span></span>
+        <span class="eq" id="c-trucks"></span></label>
+      <label class="field"><span class="label">Deliver on</span><input id="c-date" type="date" min="${NOW}" max="${LAST_DAY}"></label>
+      <button type="button" id="c-send" class="cta">${po ? "Send change" : "Send order"}</button>
+      ${po ? `<button type="button" id="c-cancel" class="linkish">Cancel</button>` : ""}`;
+    $("#c-m").value = form.m;
+    $("#c-date").value = form.date;
+    $("#c-m").addEventListener("input", (e) => { form.m = +e.target.value || 0; paint(); });
+    $("#c-date").addEventListener("change", (e) => { form.date = e.target.value; });
     paint();
   }
-
-  // Share your outlook: what you expect to order each of the next 6 weeks.
-  function drawOutlook(tabs) {
-    if (!form.outlook) form.outlook = Array.from({ length: RULES.weeks }, (_, wk) => fcNow(wk));
-    const last = E.latestOutlook(state.items, customer);
-    $("#c-form").innerHTML = `${tabs}
-      <h1>Your next 6 weeks</h1>
-      <p class="lede">Tell Ball what you expect to order, as soon as you know: promotions, filling-line changes, new business. Ball turns it into trucks and lines up carriers weeks ahead. It isn't an order.</p>
-      <table class="ol-table"><thead><tr><th>Week</th><th>Million cans</th><th>Truckloads</th><th>Change</th></tr></thead>
-        <tbody>${form.outlook.map((n, wk) => `<tr><th scope="row">${esc(weekName(wk))}</th>
-          <td><input type="number" class="ol-in" data-wk="${wk}" min="0" max="40" step="0.2" value="${millions(n)}"></td>
-          <td class="ol-n" id="ol-n-${wk}"></td><td id="ol-d-${wk}"></td></tr>`).join("")}</tbody></table>
-      <div class="field"><span class="label">What's driving it?</span>
-        <div class="seg" id="c-reason">${REASONS.map((r) => `<button type="button" data-reason="${esc(r)}">${esc(r)}</button>`).join("")}</div></div>
-      <p class="small">${last ? `Last shared ${esc(stamp(last.created_at))}${last.data.by?.name ? ` by ${esc(last.data.by.name)}` : ""}.` : "Not shared yet: Ball is planning on your quarterly forecast."} Changes 2+ weeks ahead let Ball plan the cans and the trucks.</p>
-      <button type="button" id="c-share" class="cta">Share outlook with Ball</button>`;
-    $("#c-form").querySelectorAll(".ol-in").forEach((inp) => inp.addEventListener("input", (e) => {
-      form.outlook[+e.target.dataset.wk] = Math.max(0, Math.round((+e.target.value || 0) * 1e6 / RULES.cansPerTruck));
-      paintOutlook();
-    }));
-    paintOutlook();
-  }
-  function paintOutlook() {
-    document.querySelectorAll("#c-reason button").forEach((b) => b.classList.toggle("on", b.dataset.reason === form.reason));
-    form.outlook.forEach((n, wk) => {
-      const was = fcNow(wk);
-      $(`#ol-n-${wk}`).textContent = n;
-      $(`#ol-d-${wk}`).innerHTML = n === was ? `<span class="meta-sm">same</span>` : `<span class="delta ${n > was ? "up" : "down"}">${n > was ? "+" : "−"}${Math.abs(n - was)}</span>`;
-    });
-  }
-
   function paint() {
-    if (form.mode === "outlook" && !changing()) return paintOutlook();
     const po = changing();
-    if ($("#c-date")) $("#c-date").value = form.date;
-    $("#c-cans").value = form.cans;
-    document.querySelectorAll("#c-reason button, #c-mode button").forEach((b) => b.classList.toggle("on", b.dataset.reason === form.reason || b.dataset.mode === form.mode));
-    const date = po ? E.dateOf(po) : form.date;
-    const now = po ? poTotal(state.items, po) : 0;
-    const delta = trucks() - now;
-    $("#c-trucks").innerHTML = po
-      ? `= <strong>${plural(trucks(), "truckload")}</strong>: that's <strong>${delta > 0 ? "+" : delta < 0 ? "−" : ""}${Math.abs(delta)}</strong> vs. today's ${now}`
-      : `= <strong>${plural(trucks(), "truckload")}</strong> at ${num(RULES.cansPerTruck)} cans per truck`;
-    // What will happen when they send it: confirmed instantly, or reviewed by Ball's teams (and why).
-    if (po && !delta) { $("#c-rules").innerHTML = `<p class="small top0">Type the new total above to see what happens.</p>`; return; }
-    const d = draft();
-    const items = [...state.items, d];
-    const au = E.autoApprove(items, d, NOW);
-    const b = E.bandCheck(items, d, NOW);
-    const days = E.daysBetween(NOW, date);
-    const why = [];
-    if (!au.checks.sales.ok) why.push(days < RULES.noticeDays ? `Delivery is only ${plural(days, "day")} away (changes inside ${RULES.noticeDays} days are hard to fill).`
-      : `That week would be ${b.weekTotal} truckloads vs. your outlook of ${b.fc}. Within ${b.fc - b.band}–${b.fc + b.band} (±10%) is routine.`);
-    if (!au.checks.inventory.ok || !au.checks.production.ok) why.push("Ball needs to check it can make the cans in time.");
-    if (!au.checks.logistics.ok) why.push("Ball needs to line up trucks for it.");
-    if (au.tier !== "Priority") why.push(`Your POs are reviewed by Ball's teams until ${pct(RULES.priorityAt)} of your orders stay within your outlook.`);
-    $("#c-rules").innerHTML = au.ok
-      ? `<div class="preview preview-ok"><p class="pv-h">${icon("check")}Confirmed instantly</p><p>It's within your flex band and Ball has the cans and trucks. Priority customers skip the review.</p></div>`
-      : `<div class="preview"><p class="pv-h">Goes to Ball's teams for review</p><ul>${why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul><p class="small">Sales, Inventory, Production and Logistics answer within 4 hours (target).</p></div>`;
+    const n = fromMillions(form.m);
+    const was = po ? poTotal(state.items, po) : 0;
+    $("#c-trucks").innerHTML = `= <strong>${plural(n, "truckload")}</strong>${po && n !== was ? ` <span class="delta">${n > was ? "+" : "−"}${Math.abs(n - was)}</span>` : ""}`;
   }
 
-  function mount() {
-    drawForm();
-    $("#app").addEventListener("click", async (e) => {
-      const b = e.target.closest("button");
-      if (!b) return;
-      if (b.dataset.mode) { form.mode = b.dataset.mode; form.outlook = null; return drawForm(); }
-      if (b.dataset.cans) { form.cans = +b.dataset.cans; return paint(); }
-      if (b.dataset.reason) { form.reason = b.dataset.reason; return paint(); }
-      if (b.id === "c-cancel") { form.changeOf = null; form.cans = 2000000; return drawForm(); }
-      if (b.dataset.change) {
-        form.changeOf = b.dataset.change;
-        form.cans = poTotal(state.items, changing()) * RULES.cansPerTruck;
-        form.reason = "Demand up";
-        drawForm();
-        return scrollTo({ top: 0, behavior: "smooth" });
-      }
-      if (b.id === "c-send") return send(b);
-      if (b.id === "c-share") return share(b);
-      if (b.dataset.reply) return reply(b);
-    });
-  }
-
-  async function send(btn) {
-    const po = changing();
-    const delta = po ? trucks() - poTotal(state.items, po) : trucks();
-    if (po && !delta) return toast("That's the same amount you have now.", true);
+  async function add(btn, data, msg) {
     btn.disabled = true;
     try {
-      const fresh = await store.list();
-      const d = draft();
-      d.data = { ...d.data, cans: d.data.trucks * RULES.cansPerTruck, reason: form.reason, by: { name: ME.name } };
-      const au = E.autoApprove([...fresh, d], d, NOW);
-      const ev = po ? `Requested a change: ${delta > 0 ? "+" : "−"}${plural(Math.abs(delta), "truckload")}` : `Sent the PO: ${plural(trucks(), "truckload")} for ${fmtDate(form.date)}`;
-      const at = nowIso();
-      const auto = au.ok ? [{ at, by: "Ball HQ", tm: "system", ev: "Confirmed instantly: Priority customer, within the flex band, every check passed", cust: "Confirmed instantly" }] : [];
-      await store.add({ type: "order", status: au.ok ? "confirmed" : "waiting",
-        data: E.withLog({ ...d.data, ...(au.ok ? { answer: { kind: "auto", at } } : {}) }, entry(ev, ev), ...auto) });
-      toast(au.ok ? "Confirmed instantly. Ball's Logistics team books the trucks." : po ? "Change request sent to Ball's teams." : "PO sent to Ball's teams for review.");
-      form.changeOf = null; form.cans = 2000000;
+      await store.add({ type: "order", status: "waiting", data: { signoffs: {}, ...data } });
+      toast(msg);
+      form.changeOf = null; form.m = 2;
       drawForm();
       state.refresh();
     } catch (err) { toast("Couldn't send: " + err.message, true); }
     finally { btn.disabled = false; }
   }
-
-  async function share(btn) {
-    btn.disabled = true;
-    try {
-      const weeks = Object.fromEntries(form.outlook.map((n, wk) => [E.addDays(E.weekKey(NOW), wk * 7), n]));
-      const changed = form.outlook.map((n, wk) => [wk, n - fcNow(wk)]).filter(([, d]) => d);
-      const ev = changed.length ? `Shared their outlook: ${changed.map(([wk, d]) => `${weekLabel(E.addDays(E.weekKey(NOW), wk * 7))} ${d > 0 ? "+" : "−"}${Math.abs(d)}`).join(", ")} (${form.reason})` : "Confirmed their outlook: no changes";
-      await store.add({ type: "forecast", status: "shared", data: { customer, weeks, note: form.reason, by: { name: ME.name }, log: [entry(ev, ev)] } });
-      toast(changed.length ? "Shared. Ball sees the change in trucks now." : "Shared. Ball knows nothing changed.");
-      form.outlook = null;
-      state.refresh();
-    } catch (err) {
-      toast(/check constraint/i.test(err.message) ? "Couldn't share: the database needs update-4.sql (ask your admin)." : "Couldn't share: " + err.message, true);
-    } finally { btn.disabled = false; }
+  function send(btn) {
+    const po = changing();
+    const n = fromMillions(form.m);
+    if (!n) return toast("Enter an amount.", true);
+    if (form.date < NOW || form.date > LAST_DAY) return toast("Pick a date in the next 6 weeks.", true);
+    if (!po) return add(btn, { kind: "po", customer: state.company, trucks: n, cans: n * RULES.cansPerTruck, date: form.date }, "Order sent.");
+    const delta = n - poTotal(state.items, po);
+    if (!delta) return toast("That's the same as now.", true);
+    return add(btn, { kind: "change", parent: po.id, customer: po.data.customer, trucks: delta, cans: delta * RULES.cansPerTruck, date: form.date }, "Change sent.");
   }
 
-  async function reply(btn) {
-    btn.disabled = true;
-    try {
-      const it = byId(await store.list(), btn.dataset.id);
-      if (!it || it.status !== "offered") return;
-      const yes = btn.dataset.reply === "yes";
-      const ev = yes ? `Accepted Ball's date: ${fmtDate(it.data.answer.date)}` : "Declined Ball's offer";
-      await store.update(it.id, { status: yes ? "confirmed" : "declined", data: E.withLog({ ...it.data, customer_reply: { yes, at: nowIso() } }, entry(ev, ev)) });
-      toast(yes ? "Accepted. Ball's Logistics team books the trucks next." : "Declined.");
-      state.refresh();
-    } catch (err) { toast("Couldn't update: " + err.message, true); btn.disabled = false; }
+  function mount() {
+    drawForm();
+    $("#app").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.id === "c-send") return send(b);
+      if (b.id === "c-cancel") { form.changeOf = null; form.m = 2; return drawForm(); }
+      if (b.dataset.change) {
+        form.changeOf = b.dataset.change;
+        const po = changing();
+        form.m = millions(poTotal(state.items, po));
+        form.date = po.data.date;
+        drawForm();
+        $("#c-m").focus();
+        return scrollTo({ top: 0, behavior: "smooth" });
+      }
+      if (b.dataset.retry) {
+        // Denied: send the same order (or change) again for a date that works.
+        const it = byId(state.items, b.dataset.retry);
+        const { kind, parent, customer, trucks, cans } = it.data;
+        return add(b, { kind, parent, customer, trucks, cans, date: b.dataset.date, retry_of: it.id }, "Sent for " + fmtDate(b.dataset.date) + ".");
+      }
+    });
   }
 
-  // What the customer sees about one PO or change (never Ball's costs or spot).
-  function statusBlock(it) {
+  // One line per order: what, when, where it stands. A deny shows why and a date that works.
+  function line(items, it) {
     const st = E.stageOf(it);
-    if (st === "declined") {
-      const byBall = it.data.answer?.kind === "declined";
-      return `<p class="answer">${isChange(it) ? "Not changed. Your PO stays as it was." : byBall ? "Ball can't fill this PO." : "You declined Ball's offer."}</p>`;
+    const what = isChange(it) ? `Change ${it.data.trucks > 0 ? "+" : "−"}${Math.abs(it.data.trucks)}` : plural(it.data.trucks, "truckload");
+    let extra = "";
+    if (st === "denied" && it.data.denied) {
+      const retried = orders(items).some((x) => String(x.data.retry_of) === String(it.id));
+      const better = retried ? null : E.betterDate(items, it, NOW);
+      extra = `<p class="why">${CUSTOMER_WHY[it.data.denied.team]}</p>
+        ${better ? `<button type="button" class="util on small" data-retry="${esc(it.id)}" data-date="${better.date}">Try ${esc(fmtDate(better.date))}</button>` : ""}`;
     }
-    const step = CUST_AT[st];
-    const bar = `<ol class="steps-bar">${CUST_STEPS.map((s, i) => `<li class="${i + 1 < step || step === 4 ? "done" : i + 1 === step ? "now" : ""}">${s}</li>`).join("")}</ol>`;
-    let line = "";
-    if (st === "review") {
-      const done = TEAMS.filter((t) => it.data.signoffs?.[t]).length;
-      line = `<p class="answer">Ball is reviewing: <strong>${done} of 4 teams</strong> have answered.</p>`;
-    } else if (st === "offered") {
-      line = `<p class="answer answer-offer">Ball can't do ${esc(fmtDate(it.data.date))}, but can deliver on <strong>${esc(fmtDate(it.data.answer.date))}</strong>. Does that work?</p>
-        <div class="card-actions"><button type="button" class="util on" data-reply="yes" data-id="${esc(it.id)}">Accept ${esc(fmtShort(it.data.answer.date))}</button>
-        <button type="button" class="util" data-reply="no" data-id="${esc(it.id)}">Decline</button></div>`;
-    } else if (st === "accepted") line = `<p class="answer answer-yes">${icon("check")}${it.data.answer?.kind === "auto" ? "Confirmed instantly" : "Accepted"} for ${esc(fmtDate(E.dateOf(it)))}. Ball's Logistics team is booking trucks.</p>`;
-    else line = `<p class="answer answer-yes">${icon("check")}Trucks booked for ${esc(fmtDate(E.dateOf(it)))}.</p>`;
-    return bar + line;
+    return `<div class="o-line"><span class="o-what">${what} · ${esc(fmtDate(it.data.date))}</span>${stageChip(it, true)}</div>${extra}`;
   }
-  const custLog = (it) => {
-    const seen = logOf(it).filter((e) => e.cust);
-    return seen.length > 1 ? `<details class="c-log"><summary>History</summary><ol class="log">${seen.reverse().map((e) => `<li><time>${esc(stamp(e.at))}</time><span>${esc(e.cust)}</span></li>`).join("")}</ol></details>` : "";
-  };
 
   function live(items) {
     if (form.changeOf && !changing()) { form.changeOf = null; drawForm(); }
-    const pos = orders(items).filter((x) => !isChange(x) && x.data.customer === customer).reverse();
-    $("#c-mine").innerHTML = pos.length ? pos.map((po) => {
-      const changes = changesOf(items, po).reverse();
-      return `<article class="card card-plain">
-        <div class="card-head"><span class="pill">${E.poNumber(items, po)}</span><span class="meta-sm">${esc(po.data.reason || "")} · sent ${esc(time(po.created_at))}${po.data.by?.name ? ` by ${esc(po.data.by.name)}` : ""}</span></div>
-        <h3>${plural(poTotal(items, po), "truckload")} · ${esc(fmtDate(E.dateOf(po)))}</h3>
-        ${statusBlock(po)}${custLog(po)}
-        ${changes.map((c) => `<div class="change-box"><p class="change-h">${whatLine(items, c)} <span class="meta-sm">· ${esc(time(c.created_at))}</span></p>${statusBlock(c)}${custLog(c)}</div>`).join("")}
-        ${po.status !== "declined" ? `<div class="card-actions"><button type="button" class="util" data-change="${esc(po.id)}">Request a change</button></div>` : ""}
-      </article>`;
-    }).join("") : `<p class="empty">No POs yet. Place one on the left.</p>`;
-    const r = E.reliability(items, customer, NOW);
-    const pr = r.tier === "Priority";
-    $("#c-score").innerHTML = `<h2>Your reliability</h2>
-      <p class="score"><span class="big">${pct(r.score)}</span> of your orders this quarter stayed within your outlook (±10%).</p>
-      <p class="tier tier-${r.tier.toLowerCase()}">${pr ? `${icon("check")}Priority customer: POs within your flex band are confirmed instantly, and you get first claim on summer peak capacity.`
-        : `Standard customer: your POs are reviewed by Ball's teams. Reach ${pct(RULES.priorityAt)} within your outlook to be confirmed instantly and get priority for summer peak capacity.`}</p>
-      <p class="small">Counts every PO and change you send. ${r.orders ? `This session: ${r.inBand} of ${r.orders} within your outlook.` : ""} The quarter's starting score is simulated for the pilot.</p>`;
-    if (form.mode === "outlook" && !form.changeOf && !form.outlook) drawForm();
-    else if (!form.changeOf) paint();
+    const pos = orders(items).filter((x) => !isChange(x) && x.data.customer === state.company).reverse();
+    $("#c-mine").innerHTML = pos.length ? pos.map((po) => `<article class="card">
+        <div class="card-head"><span class="pill">${E.poNumber(items, po)}</span>
+          ${["checking", "accepted", "booked"].includes(E.stageOf(po)) ? `<button type="button" class="util small" data-change="${esc(po.id)}">Change</button>` : ""}</div>
+        ${line(items, po)}
+        ${changesOf(items, po).map((c) => `<div class="sub-line">${line(items, c)}</div>`).join("")}
+      </article>`).join("") : `<p class="empty">No orders yet.</p>`;
+    if (!form.changeOf) paint();
   }
 
   return { html, mount, live };
 }
 
-// ---------- Ball HQ: shared PO board (used by All POs and every department) ----------
-async function askCarrier(store, items, lane, date, trucks, forItem) {
-  const ans = E.carrierAnswer(items, lane, date, trucks, NOW);
-  await store.add({ type: "ask", status: ans.status, data: { kind: lane.kind, destination: lane.destination, week: E.weekKey(date), date, trucks, accepted: ans.accepted, for: forItem?.id ?? null, why: ans.why, by: { name: ME.name } } });
-  if (forItem) {
-    const it = byId(await store.list(), forItem.id);
-    if (it) await store.update(it.id, { data: E.withLog(it.data, entry(`Asked the carrier for ${trucks > 0 ? "+" : ""}${trucks}. Carrier: ${ans.why}`)) });
-  }
-  toast(`Carrier: ${ans.why}`, ans.status === "no");
-}
-
-function board(store, state, team) {
+// ---------- Ball HQ · Orders (every department accepts or denies) ----------
+function ordersView(store, state) {
   let selected = location.hash.slice(1) || null;
-  let filter = "all";
-  const moreOpen = new Set(); // which teams' "Why" panels are open
-  const html = `<div class="cols cols-team">
-    <section class="panel queue"><div id="r-filter"></div><div id="r-queue"><p class="empty">Loading…</p></div></section>
-    <section class="panel" id="r-detail"><p class="empty">Loading…</p></section>
+  let filter = "mine";
+  const html = `<div class="cols cols-orders">
+    <section class="panel list"><div class="seg" id="o-filter"><button type="button" data-filter="mine">Waiting on me</button><button type="button" data-filter="all">All</button></div><div id="o-list"></div></section>
+    <section class="panel" id="o-detail"></section>
   </div>`;
 
   function mount() {
-    $("#app").addEventListener("toggle", (e) => {
-      const d = e.target.closest?.("[data-more]");
-      if (d) d.open ? moreOpen.add(d.dataset.more) : moreOpen.delete(d.dataset.more);
-    }, true);
     $("#app").addEventListener("click", async (e) => {
-      const pick = e.target.closest("[data-pick]");
-      if (pick) { selected = pick.dataset.pick; history.replaceState(null, "", "#" + selected); return live(state.items); }
       const f = e.target.closest("[data-filter]");
       if (f) { filter = f.dataset.filter; return live(state.items); }
-      const b = e.target.closest("button[data-id]");
+      const pick = e.target.closest("[data-pick]");
+      if (pick) { selected = pick.dataset.pick; history.replaceState(null, "", "#" + selected); return live(state.items); }
+      const b = e.target.closest("button[data-decide]");
       if (!b) return;
       b.disabled = true;
       try {
-        const it = byId(await store.list(), b.dataset.id); // re-read so two teams answering at once don't overwrite each other
-        if (!it) return;
-        if (b.dataset.sign) await sign(it, b.dataset.sign, b.dataset.ok === "1");
-        else if (b.dataset.ask) await askCarrier(store, state.items, E.itemLane(it), E.dateOf(it), +b.dataset.ask, it);
-        else if (b.dataset.answer) await answer(it, b.dataset.answer, b.dataset.date);
+        const fresh = await store.list(); // re-read so two departments answering at once don't overwrite each other
+        const it = byId(fresh, b.dataset.id);
+        const u = it && E.decide(fresh, it, b.dataset.decide, b.dataset.ok === "1", nowIso(), NOW);
+        if (!u) return toast("Already booked.", true);
+        await store.update(it.id, { status: u.status, data: u.data });
+        toast(u.status === "confirmed" ? "All four accepted." : u.status === "declined" ? "Denied." : "Accepted.");
         state.refresh();
-      } catch (err) { toast("Couldn't update: " + err.message, true); }
+      } catch (err) { toast("Couldn't save: " + err.message, true); }
       finally { b.disabled = false; }
     });
   }
 
-  async function sign(it, t, ok) {
-    if (!mine(t)) return toast(`Only ${TEAM_NAME[t]} can answer for ${TEAM_NAME[t]}.`, true);
-    const u = E.applySign(it, t, ok, ME, nowIso());
-    if (!u) return toast(E.answersOpen(it) ? "That's already your answer." : "Answers are locked on this PO.", true);
-    await store.update(it.id, { status: u.status, data: u.data });
-    toast(u.event.startsWith("All four") ? "All four teams approved. Accepted: Logistics books the trucks next."
-      : u.event.startsWith("Back in review") ? "Changed. The PO is back in review, and the customer sees Ball is re-checking." : u.event + ".");
-  }
-
-  async function answer(it, kind, date) {
-    if (!mine("sales")) return toast("Only Sales answers the customer.", true);
-    const at = nowIso();
-    if (kind === "new_date") {
-      const ev = `Offered ${fmtDate(date)} instead`;
-      await store.update(it.id, { status: "offered", data: E.withLog({ ...it.data, answer: { kind, date, at } }, entry(ev, `Ball offered ${fmtDate(date)} instead`)) });
-    } else if (kind === "override") {
-      await store.update(it.id, { status: "confirmed", data: E.withLog({ ...it.data, answer: { kind, at } }, entry("Accepted as an exception", "Accepted by Ball")) });
-    } else {
-      await store.update(it.id, { status: "declined", data: E.withLog({ ...it.data, answer: { kind: "declined", at } }, entry("Declined", "Ball declined")) });
-    }
-    toast(kind === "new_date" ? "Counteroffer sent. The customer sees it now." : kind === "override" ? "Accepted as an exception. It goes to Logistics." : "Declined. The customer sees it now.");
-  }
-
-  // Each team: its question, the app's check, the reasons (folded), and its answer.
-  // Only that team can answer; anyone can see it. Answers stay changeable until trucks are booked.
-  function teamBox(it, t, c, extra = "") {
-    const s = it.data.signoffs?.[t];
-    const open = E.answersOpen(it);
-    const cls = s ? (s.ok ? "tbox-yes" : "tbox-no") : c.ok ? "tbox-ok" : "tbox-warn";
-    const auto = !s && it.data.answer?.kind === "auto";
-    let act = "";
-    if (auto) act = `<p class="tb-signed">${icon("check")}Auto-approved: the check passed</p>${open && mine(t) ? `<button type="button" class="util slim" data-sign="${t}" data-ok="0" data-id="${esc(it.id)}">${icon("back")}Change to Reject</button>` : ""}`;
-    else if (open && mine(t)) act = s
-      ? `<button type="button" class="util slim" data-sign="${t}" data-ok="${s.ok ? 0 : 1}" data-id="${esc(it.id)}">${icon("back")}Change to ${s.ok ? "Reject" : "Approve"}</button>`
-      : `<div class="tb-btns"><button type="button" class="util${c.ok ? " on" : ""}" data-sign="${t}" data-ok="1" data-id="${esc(it.id)}">Approve</button>
-          <button type="button" class="util${c.ok ? "" : " on"}" data-sign="${t}" data-ok="0" data-id="${esc(it.id)}">Reject</button></div>`;
-    else if (open && !s) act = `<p class="tb-signed tb-none">Waiting on ${TEAM_NAME[t]} · ${actAs(t)}</p>`;
-    return `<div class="tbox ${cls}${t === team ? " tbox-focus" : ""}">
-      <p class="tb-team">${TEAM_NAME[t]}</p>
-      <p class="tb-q">${QUESTIONS[t]}</p>
-      <p class="tb-verdict ${c.ok ? "tb-ok" : "tb-bad"}">${icon(c.ok ? "check" : "x")}${esc(c.verdict)}</p>
-      <details class="tb-more" data-more="${t}"${moreOpen.has(t) ? " open" : ""}><summary>Why</summary>
-        <ul class="tb-facts">${c.facts.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></details>
-      ${extra}
-      ${s ? `<p class="tb-signed">${icon(s.ok ? "check" : "x")}${s.ok ? "Approved" : "Rejected"}${s.by ? ` by ${esc(s.by)}` : ""} · ${esc(time(s.at))}${s.ok !== c.ok ? " (overrode the check)" : ""}</p>` : open ? "" : `<p class="tb-signed tb-none">No answer</p>`}
-      ${act}
-    </div>`;
-  }
-
-  // The one thing that happens next on this PO, and who does it.
-  function nextStep(items, it, r, logAsk) {
-    const a = r.checks.alloc;
-    const signed = r.signed;
-    const st = E.stageOf(it);
-    if (st === "offered") return { tone: "", html: `<p><strong>Waiting on the customer</strong> to accept ${esc(fmtDate(it.data.answer.date))}.</p>` };
-    if (st === "declined") return { tone: "", html: `<p><strong>Declined</strong>${it.data.customer_reply ? " by the customer" : " by Ball"}. Nothing ships.</p>` };
-    if (st === "booked") return { tone: "ok", html: `<p>${icon("check")}<strong>Trucks booked:</strong> ${chips(a.contract, a.spot)}</p>` };
-    if (st === "accepted") return { tone: "ok", html: `<p>${icon("check")}<strong>${it.data.answer?.kind === "auto" ? "Confirmed instantly: Priority customer, within the flex band, every check passed" : `Accepted${it.data.answer?.kind === "override" ? " as an exception" : ""}`}.</strong> Next, Logistics books the trucks.</p>
-       ${mine("logistics") ? `<a class="util on next-link" href="${link("logistics", { tab: "book" })}">Book trucks ${icon("arrow")}</a>` : `<p class="small">Waiting on Logistics · ${actAs("logistics")}</p>`}` };
-    if (r.refused.length) {
-      const better = E.betterDate(items, it, NOW);
-      const who = `<p><strong>${r.refused.map((t) => TEAM_NAME[t]).join(" and ")} rejected it.</strong> Sales answers the customer${mine("sales") ? ":" : "."}</p>`;
-      if (!mine("sales")) return { tone: "warn", html: `${who}<p class="small">Waiting on Sales · ${actAs("sales")}</p>` };
-      return { tone: "warn", html: `${who}
-        <div class="card-actions">
-          ${better ? `<button type="button" class="util on" data-answer="new_date" data-date="${better.date}" data-id="${esc(it.id)}">Offer ${esc(fmtDate(better.date))} instead</button>` : ""}
-          <button type="button" class="util" data-answer="override" data-id="${esc(it.id)}">Accept anyway${a.spot ? ` (Ball pays ${money(a.overspend)} for spot)` : ""}</button>
-          <button type="button" class="util" data-answer="declined" data-id="${esc(it.id)}">Decline</button>
-        </div>${better ? `<p class="small">${esc(fmtDate(better.date))} passes Production and fits on contract trucks${better.gain ? `, saving ${money(better.gain)}` : ""}.</p>` : `<p class="small">No date in the next few weeks passes every check.</p>`}` };
-    }
-    if (!signed.logistics && logAsk) return { tone: "warn", html: `<p><strong>Logistics:</strong> ask the carrier for ${a.capSpot} more trucks before answering. With a week's notice it can usually add some.</p>` };
-    const waiting = TEAMS.filter((t) => !signed[t]).map((t) => TEAM_NAME[t]);
-    return { tone: "", html: `<p><strong>Waiting on ${waiting.join(", ")}.</strong> When all four approve, the PO is accepted and goes to Logistics.</p>` };
-  }
-
-  const LOCK = {
-    offered: "Answers are paused while the customer decides on Ball's date.",
-    booked: "Answers are locked because the trucks are booked. To reopen them, Logistics un-books it on Book trucks.",
-    declined: "Answers are locked because this PO was declined.",
+  const needsMe = (it) => TEAMS.includes(state.dept) && E.stageOf(it) === "checking" && !it.data.signoffs?.[state.dept];
+  const dots = (it) => `<span class="dots">${TEAMS.map((t) => { const s = it.data.signoffs?.[t]; return `<i class="dot ${s ? (s.ok ? "dot-yes" : "dot-no") : ""}" title="${DEPT[t]}"></i>`; }).join("")}</span>`;
+  const whatOf = (items, it) => {
+    if (!isChange(it)) return plural(it.data.trucks, "truckload");
+    const sign = it.data.trucks > 0 ? "+" : "−";
+    return `Change ${sign}${Math.abs(it.data.trucks)}`;
   };
 
   function detail(items, it) {
-    const r = E.review(items, it, NOW);
-    const c = r.checks;
-    const a = c.alloc;
+    // Checks are read as if the order were still open, so a denied order still shows why.
+    const open = it.status === "declined" ? { ...it, status: "waiting" } : it;
+    const c = E.checks(items.map((x) => (x.id === it.id ? open : x)), open, NOW);
     const st = E.stageOf(it);
-    const asks = items.filter((x) => x.type === "ask" && String(x.data.for) === String(it.id));
-    const logAsk = st === "review" && a.capSpot > 0 && !asks.some((x) => x.data.trucks > 0);
-    let logExtra = asks.map((x) => `<p class="ask-line ask-${x.status}">Carrier: ${esc(x.data.why)}</p>`).join("");
-    if (logAsk && mine("logistics")) logExtra += `<button type="button" class="util on wide" data-ask="${a.capSpot}" data-id="${esc(it.id)}">Ask the carrier for ${a.capSpot} more trucks</button>`;
-
-    const signed = r.signed;
-    const marks = TEAMS.map((t) => `<li class="${signed[t] ? (signed[t].ok ? "m-yes" : "m-no") : ""}">${icon(signed[t] ? (signed[t].ok ? "check" : "x") : "dot")}${TEAM_NAME[t]}</li>`).join("");
-    const next = nextStep(items, it, r, logAsk);
+    const canAnswer = st !== "booked";
+    const card = (t) => {
+      const s = it.data.signoffs?.[t];
+      const mine = state.dept === t;
+      return `<div class="dcard ${s ? (s.ok ? "d-yes" : "d-no") : ""}${mine ? " d-mine" : ""}">
+        <p class="d-name">${DEPT[t]}</p>
+        <p class="d-check ${c[t].ok ? "ok" : "bad"}">${icon(c[t].ok ? "check" : "x")}${esc(c[t].verdict)}</p>
+        ${mine && canAnswer ? `<div class="d-btns"><button type="button" class="util${s?.ok === true ? " on" : !s && c[t].ok ? " rec" : ""}" data-decide="${t}" data-ok="1" data-id="${esc(it.id)}">Accept</button>
+            <button type="button" class="util${s?.ok === false ? " on-no" : !s && !c[t].ok ? " rec-no" : ""}" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
+          : `<p class="d-status">${s ? (s.ok ? "Accepted" : "Denied") : "Waiting"}</p>`}
+      </div>`;
+    };
     const parent = isChange(it) ? byId(items, it.data.parent) : null;
-    const kids = isChange(it) ? [] : changesOf(items, it);
-    const related = parent ? `<p class="related">Change to <button type="button" class="linkish" data-pick="${esc(parent.id)}">${E.poNumber(items, parent)}</button>, now ${plural(poTotal(items, parent), "truckload")} (${STAGES[E.stageOf(parent)].toLowerCase()}).</p>`
-      : kids.length ? `<p class="related">Changes: ${kids.map((k) => `<button type="button" class="linkish" data-pick="${esc(k.id)}">${k.data.trucks > 0 ? "+" : "−"}${Math.abs(k.data.trucks)} · ${STAGES[E.stageOf(k)].toLowerCase()}</button>`).join(" ")}</p>` : "";
-    const log = logOf(it).reverse();
-
-    return `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${isChange(it) ? `<span class="pill pill-change">Change request</span>` : ""}${stagePill(it)}
-        <time>Updated ${esc(ago(log[0].at))}${ago(log[0].at) === "just now" ? "" : " ago"}</time></div>
+    return `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${stageChip(it)}</div>
       <h1 class="detail-h">${esc(custName(it.data.customer))}</h1>
-      ${(() => { const rel = E.reliability(items, it.data.customer, NOW); return `<p class="rel">${pct(rel.score)} of their orders within their outlook · <span class="tierchip tier-${rel.tier.toLowerCase()}">${rel.tier}</span></p>`; })()}
-      <p class="po-what">${whatLine(items, it)} · ${esc(it.data.reason || "")}</p>
-      ${related}
-      <div class="signrow"><ul class="marks">${marks}</ul><span class="m-count">${r.approved} of 4 approved${r.refused.length ? `, ${r.refused.length} rejected` : ""}</span></div>
-      <div class="next next-${next.tone || "plain"}"><p class="next-label">Next step</p>${next.html}</div>
-      ${LOCK[st] ? `<p class="lock">${icon("lock")}${LOCK[st]}</p>` : st === "accepted" ? `<p class="lock lock-open">Any team can still change its answer until the trucks are booked. A new Reject sends it back to review.</p>` : ""}
-      ${it.data.trucks > 0 ? `<p class="shared shared-${a.color}">Profit per truckload: <strong>${money(a.perTruck)}</strong>
-        <span class="sh-split">${chips(a.contract, a.spot)}${a.spot ? ` · spot adds ${money(a.overspend)}` : ""}</span>
-        <span class="sh-sub">$3,100 minus extra trucking. Every team sees this number.</span></p>` : ""}
-      <div class="tboxes">
-        ${teamBox(it, "sales", c.sales)}${teamBox(it, "inventory", c.inventory)}${teamBox(it, "production", c.production)}${teamBox(it, "logistics", c.logistics, logExtra)}
-      </div>
-      <section class="history"><h2>History</h2><ol class="log">${log.map((e) => `<li><time>${esc(stamp(e.at))}</time><span><strong>${whoLabel(it, e)}</strong> ${esc(e.ev)}</span></li>`).join("")}</ol></section>`;
+      <p class="d-what">${whatOf(items, it)}${parent ? ` to ${plural(poTotal(items, parent), "truckload")}` : ""} · ${esc(fmtDate(it.data.date))}</p>
+      <div class="dcards">${TEAMS.map(card).join("")}</div>
+      ${st === "denied" && it.data.denied ? `<p class="note note-no">${DEPT[it.data.denied.team]} denied: ${esc(it.data.denied.why)}</p>` : ""}
+      ${st === "accepted" ? `<p class="note note-ok">${icon("check")}Accepted · <a href="${link("calendar", { week: E.weekIndex(it.data.date, NOW) })}">Book trucks</a></p>` : ""}
+      ${st === "booked" ? `<p class="note note-ok">${icon("check")}Trucks booked</p>` : ""}`;
   }
 
-  const row = (items, it, why) => `<button type="button" class="q-row${String(it.id) === String(selected) ? " q-on" : ""}" data-pick="${esc(it.id)}">
-      <span class="q-top"><strong>${E.poNumber(items, it)}</strong><span class="q-cust">${isChange(it) ? "Change · " : ""}${esc(SIM_CUSTOMERS[it.data.customer].name)}</span>${stagePill(it)}</span>
-      <span class="q-sub">${it.data.trucks > 0 ? "+" : "−"}${plural(Math.abs(it.data.trucks), "truckload")} · ${esc(fmtShort(E.dateOf(it)))}
-        <span class="mms">${TEAMS.map((t) => { const s = it.data.signoffs?.[t]; return `<span class="mm${s ? (s.ok ? " mm-yes" : " mm-no") : ""}" title="${TEAM_NAME[t]}: ${s ? (s.ok ? "approved" : "rejected") : "no answer yet"}">${TEAM_NAME[t][0]}</span>`; }).join("")}</span></span>
-      ${why ? `<span class="q-why">${esc(why)}</span>` : ""}
-    </button>`;
-
   function live(items) {
-    const list = orders(items).reverse();
-    let groups;
-    if (!team) {
-      const counts = Object.fromEntries(Object.keys(STAGES).map((k) => [k, list.filter((x) => E.stageOf(x) === k).length]));
-      $("#r-filter").innerHTML = `<div class="filters">${[["all", "All", list.length], ...Object.entries(STAGES).map(([k, v]) => [k, v, counts[k]])]
-        .map(([k, v, n]) => `<button type="button" class="fchip${filter === k ? " on" : ""}" data-filter="${k}">${v} <span>${n}</span></button>`).join("")}</div>`;
-      groups = [["", list.filter((x) => filter === "all" || E.stageOf(x) === filter).map((it) => [it, null])]];
-    } else {
-      const need = [], wait = [], cust = [], done = [];
-      for (const it of list) {
-        const why = needs(it, team);
-        if (why) need.push([it, why]);
-        else if (E.stageOf(it) === "review") wait.push([it, null]);
-        else if (E.stageOf(it) === "offered") cust.push([it, null]);
-        else done.push([it, null]);
-      }
-      groups = [[`Needs ${TEAM_NAME[team]}`, need], ["Waiting on other teams", wait], ["Waiting on the customer", cust], ["Decided", done]];
-    }
-    const shown = groups.flatMap(([, g]) => g.map(([it]) => it));
-    if (!shown.some((x) => String(x.id) === String(selected))) selected = (team ? groups[0][1][0]?.[0]?.id : null) ?? shown[0]?.id ?? null;
-    $("#r-queue").innerHTML = !list.length ? `<p class="empty">No POs yet. They arrive here the moment a customer sends one from Customer HQ.</p>`
-      : groups.map(([title, g]) => (title ? `<h3 class="q-group">${title} <span>${g.length}</span></h3>` : "")
-        + (g.length ? g.map(([it, why]) => row(items, it, why)).join("") : title ? `<p class="q-none">${title.startsWith("Needs") ? "Nothing waiting on you." : "None."}</p>` : `<p class="empty">None.</p>`)).join("");
+    document.querySelectorAll("#o-filter button").forEach((b) => b.classList.toggle("on", b.dataset.filter === filter));
+    const all = orders(items).reverse();
+    const list = filter === "mine" ? all.filter(needsMe) : all;
+    // Keep the order you just answered on screen (so you see the result and the next step), even if it left "Waiting on me".
+    if (!byId(items, selected)) selected = list[0]?.id ?? null;
+    $("#o-list").innerHTML = list.length ? list.map((it) => `<button type="button" class="row${String(it.id) === String(selected) ? " row-on" : ""}" data-pick="${esc(it.id)}">
+        <span class="row-top"><strong>${E.poNumber(items, it)}</strong> ${esc(custName(it.data.customer))}${dots(it)}</span>
+        <span class="row-sub">${whatOf(items, it)} · ${esc(fmtShort(it.data.date))}${stageChip(it)}</span>
+      </button>`).join("") : `<p class="empty">${filter === "mine" ? (TEAMS.includes(state.dept) ? "Nothing waiting on you." : "Pick your department above.") : "No orders yet."}</p>`;
     const it = byId(items, selected);
-    $("#r-detail").innerHTML = it ? detail(items, it) : `<h2>No PO selected</h2>
-      <p class="lede">When a customer sends a PO or a change, Sales, Inventory, Production and Logistics each check it against the same numbers and answer. Four approvals and it's accepted.</p>`;
+    $("#o-detail").innerHTML = it ? detail(items, it) : `<p class="empty">${all.length ? "Pick an order." : "Customer orders show up here."}</p>`;
   }
 
   return { html, mount, live };
 }
 
-// ---------- Department side panels ----------
-function salesPanel(items) {
-  const weeks = Array.from({ length: RULES.weeks }, (_, wk) => E.addDays(E.weekKey(NOW), wk * 7));
-  const rows = Object.entries(SIM_CUSTOMERS).map(([dest, c]) => {
-    const rel = E.reliability(items, dest, NOW);
-    const cells = weeks.map((w, wk) => {
-      const ordered = orders(items).filter((x) => E.isActive(x) && x.data.customer === dest && E.weekIndex(E.dateOf(x), NOW) === wk).reduce((s, x) => s + x.data.trucks, 0);
-      const fc = E.forecastOf(items, dest, wk, NOW);
-      const moved = fc - E.baselineFc(dest, wk);
-      const band = Math.max(1, Math.round(fc * RULES.flexBand));
-      const cls = !ordered ? "" : Math.abs(ordered - fc) <= band ? "z-green" : ordered > fc ? "z-red" : "z-yellow";
-      return `<td class="${cls}"><span class="cell-n">${ordered}</span><span class="cell-plan">of ${fc}${moved ? ` <span class="delta ${moved > 0 ? "up" : "down"}">${moved > 0 ? "+" : "−"}${Math.abs(moved)}</span>` : ""}</span></td>`;
-    }).join("");
-    return `<tr><th scope="row">${esc(c.name)}<span class="kind">${esc(dest)} · ${pct(rel.score)} reliable · ${rel.tier}</span></th>${cells}</tr>`;
-  }).join("");
-  const shares = items.filter((x) => x.type === "forecast").reverse().slice(0, 6);
-  return `<h2>Customer orders vs. their outlook, in truckloads</h2>
-    <div class="table-wrap"><table class="grid"><thead><tr><th>Customer</th>${weeks.map((w, i) => `<th>${i === 0 ? "This week" : weekLabel(w)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="small">Ordered (POs and changes, including ones in review) of the customer's latest outlook. +/− = the customer changed their outlook. Green: within ±10%. Red: above it. Yellow: below it.</p>
-    ${shares.length ? `<h3 class="sub-h">Latest outlook updates</h3><ul class="feed">${shares.map((f) => `<li><time>${esc(time(f.created_at))}</time> <strong>${esc(SIM_CUSTOMERS[f.data.customer].name)}</strong> · ${esc(logOf(f)[0]?.ev || "shared their outlook")}${f.data.by?.name ? ` · ${esc(f.data.by.name)}` : ""}</li>`).join("")}</ul>` : ""}`;
-}
-
-function inventoryPanel(items) {
-  const plan = E.planUse(items, NOW);
-  const rows = Object.entries(SIM_CUSTOMERS).map(([dest, c]) => {
-    const mineOrders = orders(items).filter((x) => E.isActive(x) && x.data.customer === dest);
-    const used = mineOrders.reduce((s, x) => s + (plan.get(x.id)?.fromStock || 0), 0);
-    const strand = mineOrders.filter((x) => x.data.trucks < 0 && plan.get(x.id)?.frozen).reduce((s, x) => s - x.data.trucks, 0);
-    return `<tr><th scope="row">${esc(c.name)}<span class="kind">${esc(dest)}</span></th><td>${c.stock}</td><td>${used}</td><td><strong>${c.stock - used}</strong></td><td>${strand ? `<span class="b b-spot">${strand}</span>` : "0"}</td></tr>`;
-  }).join("");
-  return `<h2>Labeled cans in stock at Findlay, in truckloads</h2>
-    <div class="table-wrap"><table class="grid grid-plain"><thead><tr><th>Customer</th><th>In stock</th><th>Promised to POs</th><th>Left</th><th>Stranded by cuts</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="small">Labeled cans fit only one customer. A cut after the cans are made strands them.</p>`;
-}
-
-function productionPanel(items) {
-  const plan = E.planUse(items, NOW);
-  const open = E.lineTime(items, NOW);
-  const used = open.map(() => 0);
-  for (const it of orders(items)) {
-    const p = plan.get(it.id);
-    if (p && p.toMake != null && used[p.wk] != null) used[p.wk] += p.toMake - p.short;
-  }
-  const freezeTo = E.addDays(NOW, RULES.makeLeadDays + RULES.freezeDays - 1);
-  const th = open.map((_, wk) => `<th>${wk === 0 ? "This week" : weekLabel(E.addDays(E.weekKey(NOW), wk * 7))}</th>`).join("");
-  return `<h2>Findlay line time for these customers, in truckloads of cans</h2>
-    <div class="table-wrap"><table class="grid"><thead><tr><th></th>${th}</tr></thead>
-    <tbody><tr><th scope="row">Planned<span class="kind">from outlooks shared 2+ weeks ahead</span></th>${open.map((n, i) => `<td><span class="cell-n">${n}</span>${n > SIM_LINE_TIME[i] ? `<span class="cell-plan"><span class="delta up">+${n - SIM_LINE_TIME[i]}</span> early outlook</span>` : ""}</td>`).join("")}</tr>
-      <tr><th scope="row">Used by POs</th>${used.map((n) => `<td><span class="cell-n">${n}</span></td>`).join("")}</tr>
-      <tr><th scope="row">Left</th>${open.map((n, i) => `<td class="${n - used[i] <= 0 ? "z-red" : n - used[i] <= 2 ? "z-yellow" : "z-green"}"><span class="cell-n">${n - used[i]}</span></td>`).join("")}</tr></tbody></table></div>
-    <p class="small">When a customer shares an outlook increase 2+ weeks ahead, Production plans it into that week. Frozen: anything delivering through ${esc(fmtDate(freezeTo))} (runs lock ${RULES.freezeDays} days before they start; cans are made about ${RULES.makeLeadDays} days before they ship).</p>`;
-}
-const SIDE = { sales: salesPanel, inventory: inventoryPanel, production: productionPanel };
-
-function deptHead(team, sub) {
-  return `<div class="dept-head"><div><h1>${TEAM_NAME[team]}</h1><p class="lede">${DEPT[team]}</p></div><div id="as-bar" class="as-bar"></div></div>
-    ${team === "logistics" ? `<nav class="subtabs">${Object.entries(LOG_TABS).map(([k, v]) => `<a href="${link("logistics", k === "signoff" ? {} : { tab: k })}" class="${k === sub ? "on" : ""}" data-sub="${k}">${v}</a>`).join("")}</nav>` : ""}`;
-}
-const asBar = (team) => mine(team)
-  ? `<p class="as as-me">${icon("check")}You're answering for ${TEAM_NAME[team]}.</p>`
-  : `<p class="as">You're signed in as ${TEAM_NAME[ME.team]}, so this tab is view-only. ${actAs(team)}</p>`;
-
-function deptView(store, state, team, sub) {
-  const inner = team === "logistics" && sub !== "signoff"
-    ? { book: scheduleView, outlook: outlookView, transfers: transfersView }[sub](store, state)
-    : board(store, state, team);
-  return {
-    html: deptHead(team, sub) + inner.html + (SIDE[team] ? `<section class="panel" id="d-side"></section>` : ""),
-    mount: inner.mount,
-    live(items) {
-      $("#as-bar").innerHTML = asBar(team);
-      const n = teamCount(items, "logistics"), book = orders(items).filter((x) => E.stageOf(x) === "accepted").length;
-      document.querySelectorAll(".subtabs [data-sub]").forEach((a) => {
-        const c = a.dataset.sub === "signoff" ? n - book : a.dataset.sub === "book" ? book : 0;
-        a.innerHTML = LOG_TABS[a.dataset.sub] + (c ? ` <span class="tab-count">${c}</span>` : "");
-      });
-      inner.live(items);
-      if (SIDE[team]) $("#d-side").innerHTML = SIDE[team](items);
-    },
-  };
-}
-
-// ---------- Logistics · Book trucks ----------
-function scheduleView(store, state) {
-  const html = `<section class="panel">
-      <h2>Accepted POs to book</h2>
-      <p class="lede">Book the lane's contract carrier first. If it's full, ask the carrier for extra trucks ahead of time. <strong>Spot is for emergencies</strong> and needs a reason.</p>
-      <div id="s-todo" class="cards"><p class="empty">Loading…</p></div>
-    </section>
-    <section class="panel"><h2>Booked</h2><p class="small top0">Un-book sends a PO back to Accepted, and the teams can change their answers again.</p><div id="s-done"></div></section>`;
+// ---------- Ball HQ · Truck calendar (Logistics books from here) ----------
+function calendarView(store, state) {
+  let wk = PARAMS.has("week") ? Math.min(RULES.weeks - 1, Math.max(0, +PARAMS.get("week"))) : null; // null: first week with something to book
+  let pick = null; // "laneKey@day"
+  const html = `<div class="cols cols-cal">
+    <section class="panel"><div class="cal-head"><button type="button" class="util icon-btn" id="w-prev" aria-label="Previous week">${icon("left")}</button><h1 id="w-label"></h1>
+      <button type="button" class="util icon-btn" id="w-next" aria-label="Next week">${icon("right")}</button>
+      <span class="legend"><i class="sq sq-con"></i>Booked <i class="sq sq-con-open"></i>To book <i class="sq sq-spot"></i>Spot <i class="sq sq-chk"></i>Not accepted yet</span></div>
+      <div id="cal"></div></section>
+    <section class="panel side" id="cal-side"></section>
+  </div>`;
 
   function mount() {
+    $("#w-prev").addEventListener("click", () => { wk = Math.max(0, wk - 1); pick = null; live(state.items); });
+    $("#w-next").addEventListener("click", () => { wk = Math.min(RULES.weeks - 1, wk + 1); pick = null; live(state.items); });
     $("#app").addEventListener("click", async (e) => {
-      const b = e.target.closest("button[data-id]");
+      const cell = e.target.closest("[data-cell]");
+      if (cell) {
+        pick = pick === cell.dataset.cell ? null : cell.dataset.cell;
+        if (pick) wk = E.weekIndex(pick.split("@")[1], NOW);
+        return live(state.items);
+      }
+      if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
+      const b = e.target.closest("button[data-book], button[data-ask], button[data-bookall], button[data-bookitem]");
       if (!b) return;
-      if (!mine("logistics")) return toast("Only Logistics books trucks. Use “Act as Logistics”.", true);
+      if (state.dept !== "logistics") return toast("Switch to Logistics to book.", true);
       b.disabled = true;
       try {
-        const it = byId(await store.list(), b.dataset.id);
-        if (!it) return;
-        const lane = E.itemLane(it);
-        if (b.dataset.ask) await askCarrier(store, state.items, lane, E.dateOf(it), +b.dataset.ask, it);
-        else if (b.dataset.book) {
-          if (E.stageOf(it) !== "accepted") throw new Error("it's no longer accepted. A team changed its answer");
-          const a = E.allocate(state.items, NOW).get(it.id);
-          const reason = $(`#why-${it.id}`)?.value || "";
-          if (a.spot && !reason) throw new Error("pick why spot is needed");
-          if (it.data.trucks < 0) await askCarrier(store, state.items, lane, E.dateOf(it), it.data.trucks, null);
-          const fresh = byId(await store.list(), it.id);
-          const ev = it.data.trucks < 0 ? `Released ${plural(-it.data.trucks, "contract truck")} and told the carrier`
-            : a.spot ? `Booked ${a.contract} contract + ${a.spot} spot (${reason})` : `Booked all ${a.contract} on contract`;
-          await store.update(it.id, { data: E.withLog({ ...fresh.data, scheduled_at: nowIso(), spot_reason: a.spot ? reason : null }, entry(ev, it.data.trucks < 0 ? "Change done" : `Trucks booked for ${fmtDate(E.dateOf(it))}`)) });
-          toast(it.data.trucks < 0 ? "Released. The carrier knows." : a.spot ? `Booked: ${a.contract} contract, ${a.spot} emergency spot.` : `Booked: all ${a.contract} on contract.`);
-        } else if (b.dataset.unbook) {
-          await store.update(it.id, { data: E.withLog({ ...it.data, scheduled_at: null, spot_reason: null }, entry("Un-booked: back to Accepted", "Ball is re-booking trucks")) });
-          toast("Un-booked. It's back in Accepted, and teams can change their answers.");
+        if (b.dataset.bookall || b.dataset.bookitem) {
+          // Book every unbooked truck day of one order or transfer, or of all of them.
+          const fresh = await store.list();
+          const rows = E.toBookItems(fresh, NOW).filter((x) => b.dataset.bookall || String(x.it.id) === b.dataset.bookitem);
+          const at = nowIso();
+          for (const x of rows) {
+            const it = byId(fresh, x.it.id);
+            await store.update(it.id, { data: { ...it.data, booked: { ...(it.data.booked || {}), ...Object.fromEntries(x.days.map((d) => [d.day, at])) } } });
+          }
+          toast(`Booked ${plural(rows.reduce((s, x) => s + x.trucks, 0), "truck")}.`);
+          return state.refresh();
+        }
+        const [key, day] = b.dataset.cellkey.split("@");
+        const lane = PILOT_LANES.find((l) => l.key === key);
+        if (b.dataset.book) {
+          // Book every accepted truck on this lane and day.
+          const fresh = await store.list();
+          const row = E.calendar(fresh, NOW, E.weekIndex(day, NOW)).find((r) => r.lane.key === key);
+          const c = row.cells.find((x) => x.day === day);
+          for (const m of c.moves.filter((x) => !x.checking && !x.booked)) {
+            const it = byId(fresh, m.it.id);
+            await store.update(it.id, { data: { ...it.data, booked: { ...(it.data.booked || {}), [day]: nowIso() } } });
+          }
+          toast(`Booked: ${fmtDate(day)}, ${lane.destination}.`);
+        } else {
+          const n = +b.dataset.ask;
+          const ans = E.carrierAnswer(state.items, lane, day, n, NOW);
+          await store.add({ type: "ask", status: ans.status, data: { kind: lane.kind, destination: lane.destination, week: E.weekKey(day), date: day, trucks: n, accepted: ans.accepted } });
+          toast(`Carrier: ${ans.why}`, ans.status === "no");
         }
         state.refresh();
-      } catch (err) { toast("Couldn't do that: " + err.message, true); }
+      } catch (err) { toast("Couldn't save: " + err.message, true); }
       finally { b.disabled = false; }
     });
   }
 
-  function live(items) {
-    const alloc = E.allocate(items, NOW);
-    const todo = orders(items).filter((x) => E.stageOf(x) === "accepted").sort((a, b) => (E.dateOf(a) < E.dateOf(b) ? -1 : 1));
-    const done = orders(items).filter((x) => E.stageOf(x) === "booked").reverse();
-    const L = locked("logistics");
-    $("#s-todo").innerHTML = todo.length ? todo.map((it) => {
-      const a = alloc.get(it.id);
-      const lane = E.itemLane(it);
-      const by = E.addDays(E.dateOf(it), -RULES.noticeDays);
-      const asks = items.filter((x) => x.type === "ask" && String(x.data.for) === String(it.id));
-      const head = `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${isChange(it) ? `<span class="pill pill-change">Change</span>` : ""}
-          <span class="due${E.daysBetween(NOW, by) <= 2 ? " due-soon" : ""}">Book by ${esc(fmtDate(by))}</span>
-          <a class="meta-sm open-po" href="${link("pos")}#${esc(it.id)}">Open PO</a></div>
-        <h3>${esc(laneName(lane))} · ${esc(SIM_CUSTOMERS[it.data.customer].name)} · ${esc(fmtDate(E.dateOf(it)))}</h3>`;
-      if (it.data.trucks < 0) return `<article class="card card-plain">${head}
-        <p class="meta">The customer cut ${plural(-it.data.trucks, "truckload")}. Release those contract trucks so the carrier can move its drivers.</p>
-        <div class="card-actions"><button type="button" class="util on" data-book="1" data-id="${esc(it.id)}"${L}>Release ${plural(-it.data.trucks, "contract truck")} and tell the carrier</button></div></article>`;
-      const d = a.days[0];
-      const asked = asks.some((x) => x.data.trucks > 0);
-      const askFirst = a.capSpot > 0 && !asked;
-      return `<article class="card card-plain">${head}
-        <div class="plan-rows">
-          <p><span class="b b-contract">${a.contract}</span> on the contract carrier <span class="meta-sm">(${d.weekRoom} contract trucks left that week, of ${d.cover})</span></p>
-          ${asks.map((x) => `<p class="ask-line ask-${x.status}">Carrier: ${esc(x.data.why)}</p>`).join("")}
-          ${a.spot ? `<p><span class="b b-spot">${a.spot}</span> no contract truck: <strong>spot, ${money(a.overspend)} more</strong></p>` : ""}
-        </div>
-        ${askFirst ? `<p class="hint">Before using spot, ask the carrier for extra trucks. With a week's notice it can usually add some.</p>` : ""}
-        <div class="card-actions">
-          ${askFirst ? `<button type="button" class="util on" data-ask="${a.capSpot}" data-id="${esc(it.id)}"${L}>Ask the carrier for +${a.capSpot}</button>` : ""}
-          ${a.spot ? `<select id="why-${esc(it.id)}" class="why"${L}><option value="">Why spot? (emergency only)</option>${SPOT_REASONS.map((r) => `<option>${esc(r)}</option>`).join("")}</select>` : ""}
-          <button type="button" class="util${askFirst ? "" : " on"}" data-book="1" data-id="${esc(it.id)}"${L}>${a.spot ? `Book ${a.contract} contract + ${a.spot} spot` : `Book all ${a.contract} on contract`}</button>
-        </div></article>`;
-    }).join("") : `<p class="empty">Nothing to book. POs land here when all four teams approve.</p>`;
-    $("#s-done").innerHTML = done.length ? `<ul class="done-list">${done.map((it) => {
-      const a = alloc.get(it.id);
-      return `<li><span class="done-what"><strong>${E.poNumber(items, it)}${isChange(it) ? " change" : ""} · ${esc(laneName(E.itemLane(it)))}</strong>
-          <span class="kind">${esc(fmtDate(E.dateOf(it)))}${it.data.spot_reason ? ` · spot because: ${esc(it.data.spot_reason)}` : ""}</span></span>
-        <span class="done-split">${it.data.trucks < 0 ? `released ${-it.data.trucks}` : chips(a.contract, a.spot)}</span>
-        <button type="button" class="linkish" data-unbook="1" data-id="${esc(it.id)}"${L}>Un-book</button></li>`;
-    }).join("")}</ul>` : `<p class="empty">Nothing booked yet.</p>`;
-  }
-
-  return { html, mount, live };
-}
-
-// ---------- Logistics · 6-week outlook (early warning) ----------
-const ZONE = { green: "On plan", yellow: "Watch", red: "Act now" };
-
-function outlookView(store, state) {
-  const html = `<section class="panel">
-      <h2>Early warning: Findlay's next 6 weeks, in trucks</h2>
-      <p class="lede">Customer outlooks and POs come in as cans. We turn them into trucks (${num(RULES.cansPerTruck)} cans each) and compare every lane and week with the trucks its contract carrier takes, so Logistics calls the carrier weeks ahead, not on Thursday.</p>
-      <p class="legend"><span class="z z-green">On plan</span> within ±10% <span class="z z-yellow">Watch</span> 10–25% <span class="z z-red">Act now</span> over 25% · <span class="b b-spot">n</span> trucks going spot</p>
-      <div id="o-grid"><p class="empty">Loading…</p></div>
-    </section>
-    <section class="panel"><h2>What Logistics does next</h2><div id="o-actions"></div></section>`;
-
-  function mount() {
-    $("#app").addEventListener("click", async (e) => {
-      const b = e.target.closest("button[data-cell]");
-      if (!b) return;
-      if (!mine("logistics")) return toast("Only Logistics talks to carriers. Use “Act as Logistics”.", true);
-      b.disabled = true;
-      try {
-        const [key, week] = b.dataset.cell.split("@");
-        const [kind, destination] = key.split("|");
-        await askCarrier(store, state.items, E.laneOf(kind, destination), E.addDays(week, 3), +b.dataset.n, null);
-        state.refresh();
-      } catch (err) { toast("Couldn't do that: " + err.message, true); }
-      finally { b.disabled = false; }
-    });
-  }
-
-  function live(items) {
-    const ol = E.outlook(items, NOW);
-    const L = locked("logistics");
-    const cell = (w) => `<td class="cell z-${w.zone}" title="${ZONE[w.zone]}">
-        <span class="cell-n">${w.needed}</span><span class="cell-plan">of ${w.cover}${w.extra ? ` (${w.extra > 0 ? "+" : ""}${w.extra})` : ""}</span>
-        <span class="cell-chg">${w.change > 0 ? "+" : ""}${Math.round(w.change * 100)}%</span>${w.fcChange ? `<span class="cell-plan">outlook <span class="delta ${w.fcChange > 0 ? "up" : "down"}">${w.fcChange > 0 ? "+" : "−"}${Math.abs(w.fcChange)}</span></span>` : ""}${w.spot ? `<span class="b b-spot">${w.spot}</span>` : ""}</td>`;
-    const group = (kind, title) => ol.filter((r) => r.lane.kind === kind).map((r, i) => `<tr>
-        <th scope="row">${i === 0 ? `<span class="grp">${title}</span>` : ""}${esc(r.lane.destination)}<span class="kind">~${r.lane.perWeek} contract trucks a week</span></th>${r.weeks.map(cell).join("")}</tr>`).join("");
-    $("#o-grid").innerHTML = `<div class="table-wrap"><table class="grid">
-      <thead><tr><th>Lane from Findlay</th>${ol[0].weeks.map((w, i) => `<th>${i === 0 ? "This week" : weekLabel(w.week)}</th>`).join("")}</tr></thead>
-      <tbody>${group("order", "To customers")}${group("transfer", "Transfers to warehouses")}</tbody></table></div>
-      <p class="small">Each cell: trucks needed of the contract trucks that week, and the change vs. the usual. Customer lanes: Ball's other business + the customer's outlook (or their POs, if bigger). Transfer lanes: already booked + scheduled transfers.</p>`;
-    const acts = [];
-    for (const r of ol) for (const w of r.weeks) {
-      if (!w.action) continue;
-      const where = `<strong>${esc(laneName(r.lane))}</strong> · week of ${weekLabel(w.week)}`;
-      const cust = r.lane.kind === "order" ? SIM_CUSTOMERS[r.lane.destination].name : null;
-      const what = `${w.needed} needed vs. ${r.lane.perWeek} usual (${w.change > 0 ? "+" : ""}${Math.round(w.change * 100)}%)${w.fcChange ? ` · ${cust}'s outlook ${w.fcChange > 0 ? "+" : "−"}${Math.abs(w.fcChange)}` : ""}`;
-      const cellKey = `${r.lane.key}@${w.week}`;
-      acts.push({ z: w.zone, wk: w.wk, html: w.action.kind === "more"
-        ? `<li class="act z-${w.zone}"><span>${where}<br>${what} · <strong>${w.action.trucks} short of contract trucks</strong> · ${E.daysBetween(NOW, E.addDays(w.week, 3))} days' notice</span>
-            <button type="button" class="util on" data-cell="${esc(cellKey)}" data-n="${w.action.trucks}"${L}>Ask carrier for +${w.action.trucks}</button></li>`
-        : `<li class="act z-${w.zone}"><span>${where}<br>${what} · ${w.unused} contract trucks unused</span>
-            <span class="act-btns"><button type="button" class="util" data-cell="${esc(cellKey)}" data-n="${-w.unused}"${L}>Warn carrier: −${w.unused}</button>
-            ${r.lane.kind === "transfer" ? `<a class="small" href="${link("logistics", { tab: "transfers" })}">or ship a prebuild into it →</a>` : ""}</span></li>` });
+  // Right side: the day you picked, or the list of what to book next.
+  function side(items, rows) {
+    const isLog = state.dept === "logistics";
+    if (pick) {
+      const [key, day] = pick.split("@");
+      const row = rows.find((r) => r.lane.key === key);
+      const c = row?.cells.find((x) => x.day === day);
+      if (c) {
+        const canAsk = c.fixable > 0 && E.daysBetween(NOW, day) >= RULES.carrierFlexNoticeDays;
+        return `<button type="button" class="linkish back" id="side-back">${icon("left")}To book</button>
+          <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.destination)}</p>
+          <ul class="moves">${c.moves.map((m) => `<li><span>${m.it.type === "order" ? `${E.poNumber(items, m.it)} · ${esc(custName(m.it.data.customer))}` : "Transfer"}</span>
+            <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}${m.booked ? ` ${icon("check")}` : ""}</span></li>`).join("") || `<li class="empty">Nothing moving.</li>`}</ul>
+          ${isLog && c.toBook ? `<button type="button" class="cta" data-book="1" data-cellkey="${esc(pick)}">Book ${plural(c.toBook, "truck")}</button>` : ""}
+          ${isLog && canAsk ? `<button type="button" class="util wide" data-ask="${c.fixable}" data-cellkey="${esc(pick)}">Ask carrier for +${c.fixable}</button>` : ""}
+          ${!isLog && c.toBook ? `<p class="small">Logistics books this.</p>` : ""}`;
+      }
     }
-    const rank = { red: 0, yellow: 1, green: 2 };
-    acts.sort((a, b) => rank[a.z] - rank[b.z] || a.wk - b.wk);
-    $("#o-actions").innerHTML = acts.length ? `<ul class="acts">${acts.map((a) => a.html).join("")}</ul>` : `<p class="empty">Nothing to do: every lane and week is on plan and covered.</p>`;
+    // What to book: one row per order or transfer, soonest first, each with Book; Book all at the bottom.
+    const list = E.toBookItems(items, NOW);
+    if (!list.length) return `<h2>To book</h2><p class="empty">All booked.</p>`;
+    const name = (x) => (x.it.type === "order" ? `${E.poNumber(items, x.it)} · ${custName(x.lane.destination)}` : `Transfer · ${x.lane.destination}`);
+    const when = (x) => (x.first === x.last ? `${dow(x.first)} ${fmtShort(x.first)}` : `${fmtShort(x.first)}–${fmtShort(x.last)}`);
+    return `<h2>To book</h2><ul class="tobook">${list.map((x) => `<li class="tb-row">
+        <button type="button" class="row" data-cell="${esc(x.lane.key)}@${x.first}">
+          <span class="row-top"><strong>${esc(name(x))}</strong></span>
+          <span class="row-sub">${esc(when(x))} · <span class="t-con">${x.contract}</span>${x.spot ? ` <span class="t-spot">${x.spot} spot</span>` : ""}</span></button>
+        ${isLog ? `<button type="button" class="util small" data-bookitem="${esc(x.it.id)}">Book</button>` : ""}</li>`).join("")}</ul>
+      ${isLog ? (list.length > 1 ? `<button type="button" class="cta" data-bookall="1">Book all ${list.reduce((s, x) => s + x.trucks, 0)}</button>` : "") : `<p class="small">Logistics books these.</p>`}`;
+  }
+
+  function live(items) {
+    if (wk == null) { const first = E.toBookItems(items, NOW)[0]; wk = first ? E.weekIndex(first.first, NOW) : 0; }
+    const start = E.addDays(E.weekKey(NOW), wk * 7);
+    $("#w-label").textContent = wk === 0 ? `This week · ${weekLabel(start)}` : weekLabel(start);
+    $("#w-prev").disabled = wk === 0;
+    $("#w-next").disabled = wk === RULES.weeks - 1;
+    const rows = E.calendar(items, NOW, wk);
+    const days = rows[0].cells.map((c) => c.day);
+    const group = (kind, title) => rows.filter((r) => r.lane.kind === kind).map((r, i) => `<tr>
+        <th scope="row">${i === 0 ? `<span class="grp">${title}</span>` : ""}${r.lane.kind === "order" ? `${esc(custName(r.lane.destination))}<span class="city">${esc(r.lane.destination)}</span>` : esc(r.lane.destination)}</th>
+        ${r.cells.map((c) => {
+          const key = `${r.lane.key}@${c.day}`;
+          const cls = [c.spot ? "c-spot" : c.toBook ? "c-book" : "", c.day < NOW ? "c-past" : "", pick === key ? "c-pick" : ""].join(" ");
+          return `<td class="${cls}"><button type="button" class="cell" data-cell="${esc(key)}" aria-label="${esc(r.lane.destination)} ${esc(fmtDate(c.day))}">${squares(c.moves)}</button></td>`;
+        }).join("")}</tr>`).join("");
+    $("#cal").innerHTML = `<div class="table-wrap"><table class="cal">
+      <thead><tr><th></th>${days.map((d) => `<th class="${d === NOW ? "today" : ""}">${esc(dow(d))} <span>${E.atNoon(d).getDate()}</span></th>`).join("")}</tr></thead>
+      <tbody>${group("order", "Customers")}${group("transfer", "Warehouses")}</tbody></table></div>`;
+    $("#cal-side").innerHTML = side(items, rows);
   }
 
   return { html, mount, live };
 }
 
-// ---------- Logistics · Transfers (prebuild in waves) ----------
+// ---------- Ball HQ · Transfers (plan Ball's own moves to warehouses) ----------
 function transfersView(store, state) {
-  const transferLanes = PILOT_LANES.filter((l) => l.kind === "transfer");
+  const lanes = PILOT_LANES.filter((l) => l.kind === "transfer");
   const nextMon = E.addDays(E.weekKey(NOW), 8);
   const form = { destination: "Mississauga, ON", trucks: 12, date: E.daysBetween(NOW, nextMon) >= RULES.noticeDays ? nextMon : E.addDays(nextMon, 7), pattern: "w3" };
   const html = `<div class="cols cols-plan">
     <section class="panel">
-      <h2>Ship a prebuild in waves</h2>
-      <p class="lede">64% of 2026 spot loads were Ball moving its own cans to warehouses. Ball decides when those ship. Send a big run all at once and carriers can't take it. Release it in waves and it fits on contract.</p>
-      <div class="row2">
-        <label class="field"><span class="label">To warehouse</span>
-          <select id="p-dest">${transferLanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select></label>
-        <label class="field"><span class="label">Truckloads</span>
-          <input id="p-trucks" type="number" min="1" max="200" inputmode="numeric"></label>
-        <label class="field"><span class="label">First pickup</span>
-          <input id="p-date" type="date" min="${E.addDays(NOW, RULES.noticeDays)}" max="${LAST_DAY}"></label>
+      <h1>Plan a transfer</h1>
+      <div class="row3">
+        <label class="field"><span class="label">To</span><select id="p-dest">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select></label>
+        <label class="field"><span class="label">Truckloads</span><input id="p-trucks" type="number" min="1" max="200" inputmode="numeric"></label>
+        <label class="field"><span class="label">Start</span><input id="p-date" type="date" min="${E.addDays(NOW, RULES.noticeDays)}" max="${LAST_DAY}"></label>
       </div>
-      <div id="p-compare"></div>
-      <button type="button" id="p-send" class="cta">Schedule it</button>
+      <div id="p-options" class="options" role="radiogroup" aria-label="How it ships"></div>
+      <button type="button" id="p-send" class="cta">Put on calendar</button>
     </section>
-    <section class="panel"><h2>Scheduled transfers</h2><div id="p-list"></div></section>
+    <section class="panel"><h2>Planned</h2><div id="p-list"></div></section>
   </div>`;
 
-  const draft = (pattern = form.pattern) => ({ id: "draft", type: "transfer", status: "booked", created_at: "￿",
-    data: { destination: form.destination, trucks: form.trucks, date: form.date, pattern, booked_at: nowIso() } });
+  const draft = (pattern) => ({ id: "draft", type: "transfer", status: "booked", created_at: "￿",
+    data: { destination: form.destination, trucks: form.trucks, date: form.date, pattern } });
 
   function paint() {
     $("#p-dest").value = form.destination;
     $("#p-trucks").value = form.trucks;
     $("#p-date").value = form.date;
-    $("#p-send").disabled = !mine("logistics");
-    $("#p-send").title = mine("logistics") ? "" : "Logistics only. Use “Act as Logistics”.";
-    const rows = Object.entries(PATTERNS).map(([key, p]) => ({ key, p, a: E.allocate([...state.items, draft(key)], NOW).get("draft") }));
-    const best = rows.reduce((m, r) => (r.a.profit > m.a.profit ? r : m), rows[0]);
-    $("#p-compare").innerHTML = `<p class="label">Preview: ${form.trucks} trucks to ${esc(form.destination)} from ${esc(fmtDate(form.date))}</p>
-    <table class="compare"><thead><tr><th>How it ships</th><th>Trucks</th><th>Profit per truck</th><th>Trucking cost</th></tr></thead><tbody>
-      ${rows.map(({ key, p, a }) => `<tr class="${key === form.pattern ? "c-on" : ""}">
-        <th><label><input type="radio" name="pat" value="${key}" ${key === form.pattern ? "checked" : ""}> ${p.label}${key === best.key ? ` <span class="best">best</span>` : ""}</label></th>
-        <td>${chips(a.contract, a.spot)}</td><td><span class="mini mini-${a.color}">${money(a.perTruck)}</span></td><td>${money(a.extra)}</td></tr>`).join("")}
-    </tbody></table>
-    <p class="small">Why: a carrier can add only about 1/7 of its weekly trucks on any one day, and only what's left that week after trucks already booked.</p>`;
+    const opts = Object.entries(PATTERNS).map(([key, p]) => ({ key, p, a: E.allocate([...state.items, draft(key)], NOW).get("draft") }));
+    const best = opts.reduce((m, o) => (o.a.spot < m.a.spot ? o : m), opts[0]);
+    $("#p-options").innerHTML = opts.map(({ key, p, a }) => `<button type="button" role="radio" aria-checked="${key === form.pattern}" class="option${key === form.pattern ? " on" : ""}" data-pattern="${key}">
+        <span class="op-name">${p.label}${key === best.key ? ` <span class="best">Best</span>` : ""}</span>
+        <span class="op-sq">${squares([{ contract: a.contract, spot: a.spot, booked: true }], 30)}</span>
+        <span class="op-n"><span class="t-con">${a.contract} contract</span>${a.spot ? ` <span class="t-spot">${a.spot} spot · ${money(a.overspend)}</span>` : ""}</span>
+      </button>`).join("");
   }
 
   function mount() {
     $("#p-dest").addEventListener("change", (e) => { form.destination = e.target.value; paint(); });
     $("#p-trucks").addEventListener("input", (e) => { form.trucks = Math.min(200, Math.max(1, +e.target.value || 1)); paint(); });
     $("#p-date").addEventListener("change", (e) => { form.date = e.target.value; paint(); });
-    $("#p-compare").addEventListener("change", (e) => { if (e.target.name === "pat") { form.pattern = e.target.value; paint(); } });
+    $("#p-options").addEventListener("click", (e) => { const o = e.target.closest("[data-pattern]"); if (o) { form.pattern = o.dataset.pattern; paint(); } });
+    $("#p-list").addEventListener("click", async (e) => {
+      const r = e.target.closest("[data-remove]");
+      if (!r) return;
+      if (state.dept !== "logistics") return toast("Switch to Logistics to change transfers.", true);
+      await store.update(r.dataset.remove, { status: "declined" });
+      toast("Removed.");
+      state.refresh();
+    });
     $("#p-send").addEventListener("click", async (e) => {
       const b = e.target;
+      if (state.dept !== "logistics") return toast("Switch to Logistics to plan transfers.", true);
+      if (E.daysBetween(NOW, form.date) < RULES.noticeDays) return toast(`Start ${RULES.noticeDays}+ days out.`, true);
       b.disabled = true;
       try {
-        if (E.daysBetween(NOW, form.date) < RULES.noticeDays) throw new Error(`pick a first pickup ${RULES.noticeDays}+ days out`);
-        await store.add({ type: "transfer", status: "booked", data: { ...draft().data, by: { name: ME.name } } });
-        toast(`Scheduled: ${form.trucks} trucks to ${form.destination}, ${PATTERNS[form.pattern].label.toLowerCase()}.`);
+        await store.add({ type: "transfer", status: "booked", data: { ...draft(form.pattern).data } });
+        toast(`On the calendar: ${form.trucks} to ${form.destination}.`);
         state.refresh();
-      } catch (err) { toast("Couldn't do that: " + err.message, true); }
-      finally { b.disabled = !mine("logistics"); }
+      } catch (err) { toast("Couldn't save: " + err.message, true); }
+      finally { b.disabled = false; }
     });
     paint();
   }
@@ -951,38 +497,32 @@ function transfersView(store, state) {
   function live(items) {
     paint();
     const alloc = E.allocate(items, NOW);
-    const list = items.filter((x) => x.type === "transfer").reverse();
-    $("#p-list").innerHTML = list.length ? `<ul class="done-list">${list.map((it) => {
+    const list = items.filter((x) => x.type === "transfer" && E.isActive(x)).reverse();
+    $("#p-list").innerHTML = list.length ? `<ul class="plain">${list.map((it) => {
       const a = alloc.get(it.id);
-      return `<li><span class="done-what"><strong>Findlay → ${esc(it.data.destination)}</strong><span class="kind">${plural(it.data.trucks, "truckload")} · ${esc(PATTERNS[it.data.pattern].label.toLowerCase())} from ${esc(fmtDate(it.data.date))}${it.data.by?.name ? ` · by ${esc(it.data.by.name)}` : ""}</span></span>
-        <span class="done-split">${chips(a.contract, a.spot)}</span><span class="done-money">${money(a.perTruck)}<span class="kind">per truck</span></span></li>`;
+      const booked = it.data.booked && Object.keys(it.data.booked).length;
+      return `<li><span><strong>${esc(it.data.destination)}</strong> · ${it.data.trucks} · ${esc(PATTERNS[it.data.pattern].label.toLowerCase())} from ${esc(fmtShort(it.data.date))}</span>
+        <span><span class="t-con">${a.contract} contract</span>${a.spot ? ` <span class="t-spot">${a.spot} spot</span>` : ""}
+        ${booked ? "" : `<button type="button" class="linkish inline" data-remove="${esc(it.id)}">Remove</button>`}</span></li>`;
     }).join("")}</ul>` : `<p class="empty">None yet.</p>`;
   }
 
   return { html, mount, live };
 }
 
-// ---------- Dashboard (plant manager) ----------
-function dashboardView(store, state) {
-  const html = `<section class="hub">
-      <div class="hub-head"><div><h1>Findlay pilot dashboard</h1><p class="lede">Where every PO stands, who it's waiting on, and what spot is costing.</p></div>
-        <span class="live"><span class="pulse"></span>${store.live ? "Live" : "This laptop only"}</span></div>
-      <div id="d-tiles" class="totals"><p class="empty">Loading…</p></div>
-      <div id="d-teams"></div>
-      <div id="d-cust"></div>
-      <div id="d-compare"></div>
-      <div class="cols cols-plan">
-        <section class="panel"><h2>Activity</h2><ul id="d-feed" class="feed"></ul></section>
-        <section class="panel"><h2>Emergency spot log</h2><div id="d-spot"></div></section>
-      </div>
-      <button type="button" id="d-reset" class="util quiet">Clear all data (admin)</button>
-    </section>`;
+// ---------- Ball HQ · Executive ----------
+function execView(store, state) {
+  const html = `<section class="exec">
+    <div id="x-top" class="x-top"></div>
+    <div id="x-cards" class="x-cards"></div>
+    <button type="button" id="x-reset" class="linkish quiet">Clear all data</button>
+  </section>`;
 
   function mount() {
-    $("#d-reset").addEventListener("click", async () => {
-      const pin = store.live ? prompt("Enter the admin PIN to clear every PO, transfer and carrier answer:") : "local";
+    $("#x-reset").addEventListener("click", async () => {
+      const pin = store.live ? prompt("Admin PIN:") : "local";
       if (pin === null) return;
-      if (!store.live && !confirm("Clear every PO, transfer and carrier answer on this laptop?")) return;
+      if (!store.live && !confirm("Clear everything on this laptop?")) return;
       try { await store.reset(pin); toast("Cleared."); state.refresh(); }
       catch (err) { toast("Not cleared: " + err.message, true); }
     });
@@ -991,136 +531,90 @@ function dashboardView(store, state) {
   function live(items) {
     const now = E.totals(items, NOW);
     const old = E.totals(items, NOW, { oldWay: true });
-    const os = orders(items);
-    const inReview = os.filter((x) => E.stageOf(x) === "review");
-    const answered = os.filter((x) => x.data.answer?.at);
-    const avgMin = answered.length ? answered.reduce((s, x) => s + (new Date(x.data.answer.at) - new Date(x.created_at)), 0) / answered.length / 60000 : null;
-    const tile = (label, value, sub, cls = "") => `<div class="stat ${cls}"><p class="stat-label">${label}</p><p class="stat-value">${value}</p><p class="stat-sub">${sub}</p></div>`;
-    const k = E.kpis(items, NOW);
-    $("#d-tiles").innerHTML =
-      tile("Spot share", now.trucks ? pct(now.spotShare) : "–", `${now.spot} of ${now.trucks} new truckloads · ${money(now.overspend)} over contract · goal ${pct(RULES.spotGoal)}`) +
-      tile("Days of warning", k.warningDays == null ? "–" : `${Math.round(k.warningDays)} days`, "from first hearing about the volume to delivery · today: 1–3 days") +
-      tile("Booked 3+ days ahead", k.bookedAhead == null ? "–" : pct(k.bookedAhead), `${k.bookedCount} booked so far · carriers need 3+ days`) +
-      tile("Time to answer customers", avgMin == null ? "–" : avgMin < 60 ? `${Math.max(1, Math.round(avgMin))} min` : `${(avgMin / 60).toFixed(1)} hr`, `target: under 4 hours · ${inReview.length} in review now`);
-    $("#d-cust").innerHTML = `<section class="panel"><h2>Customers: reliability earns priority</h2><div class="table-wrap"><table class="grid grid-plain">
-      <thead><tr><th>Customer</th><th>Within outlook</th><th>Tier</th><th>POs</th><th>Changes</th><th>Change-order rate</th><th>Outlook shared</th></tr></thead><tbody>
-      ${Object.entries(SIM_CUSTOMERS).map(([dest, c]) => { const r = E.reliability(items, dest, NOW); const pos = os.filter((x) => x.data.customer === dest && !isChange(x)).length; const last = E.latestOutlook(items, dest);
-        return `<tr><th scope="row">${esc(c.name)}<span class="kind">${esc(dest)}</span></th><td><strong>${pct(r.score)}</strong></td><td><span class="tierchip tier-${r.tier.toLowerCase()}">${r.tier}</span></td><td>${pos}</td><td>${r.changes}</td><td>${pos ? pct(r.changes / pos) : "–"}</td><td>${last ? esc(stamp(last.created_at)) : "not yet"}</td></tr>`; }).join("")}
-      </tbody></table></div><p class="small">Priority (${pct(RULES.priorityAt)}+ of orders within their outlook): POs within the flex band are confirmed instantly. Scores start from a simulated quarter and move with every PO and change.</p></section>`;
-    $("#d-teams").innerHTML = `<section class="panel"><h2>Waiting on each team</h2><div class="teamrow">${TEAMS.map((t) => {
-      const mineNow = os.filter((x) => needs(x, t));
-      const oldest = mineNow.reduce((m, x) => (!m || x.created_at < m ? x.created_at : m), null);
-      return `<a class="teamcard${mineNow.length ? " tc-busy" : ""}" href="${link(t)}"><span class="tc-name">${TEAM_NAME[t]}</span>
-        <span class="tc-n">${mineNow.length}</span><span class="tc-sub">${mineNow.length ? `oldest waiting ${ago(oldest)}` : "nothing waiting"}</span></a>`;
-    }).join("")}</div></section>`;
-    $("#d-compare").innerHTML = now.trucks ? `<div class="compare-box">
-      <div><p class="stat-label">The old way</p><p class="cmp-n">${old.spot} spot · ${money(old.overspend)}</p><p class="small">Same POs, but nobody asks the carrier ahead and transfers ship in one batch.</p></div>
-      <div class="cmp-arrow">${icon("arrow")}</div>
-      <div><p class="stat-label">With the system</p><p class="cmp-n">${now.spot} spot · ${money(now.overspend)}</p><p class="small">Teams check together, Logistics asks carriers early, transfers go in waves.</p></div></div>` : "";
-    const alloc = E.allocate(items, NOW);
-    const spotted = os.filter((x) => E.stageOf(x) === "booked" && alloc.get(x.id)?.spot);
-    $("#d-spot").innerHTML = spotted.length ? `<ul class="feed">${spotted.map((x) => `<li><strong>${E.poNumber(items, x)}</strong> · ${alloc.get(x.id).spot} spot (${money(alloc.get(x.id).overspend)}) · ${esc(x.data.spot_reason || "")}</li>`).join("")}</ul>`
-      : `<p class="empty">No spot trucks booked. Spot is for emergencies only.</p>`;
-    // Activity: every history entry from every PO, plus carrier answers and transfers.
-    const feed = [];
-    for (const it of items) {
-      if (it.type === "forecast") feed.push({ at: it.created_at, html: `<strong>Outlook</strong> · <strong>${esc(it.data.by?.name || "Customer")} (${esc(SIM_CUSTOMERS[it.data.customer].name)})</strong> ${esc(logOf(it)[0]?.ev || "shared their outlook")}` });
-      else if (it.type === "order") for (const e of logOf(it)) feed.push({ at: e.at, html: `<a href="${link("pos")}#${esc(it.id)}"><strong>${E.poNumber(items, it)}</strong>${isChange(it) ? " change" : ""}</a> · <strong>${whoLabel(it, e)}</strong> ${esc(e.ev)}` });
-      else if (it.type === "transfer") feed.push({ at: it.created_at, html: `<strong>Transfer</strong> ${plural(it.data.trucks, "truckload")} to ${esc(it.data.destination)}, ${esc(PATTERNS[it.data.pattern].label.toLowerCase())}${it.data.by?.name ? ` · ${esc(it.data.by.name)} (Logistics)` : ""}` });
-      else if (!it.data.for) feed.push({ at: it.created_at, html: `<strong>Carrier</strong> ${esc(it.data.destination)}, week of ${weekLabel(it.data.week)}: ${esc(it.data.why || it.status)}` });
-    }
-    feed.sort((a, b) => (a.at < b.at ? 1 : -1));
-    $("#d-feed").innerHTML = feed.length ? feed.slice(0, 40).map((f) => `<li><time>${esc(time(f.at))}</time> ${f.html}</li>`).join("") : `<li class="empty">Nothing yet. Start at Customer HQ.</li>`;
+    const s = E.scorecards(items, NOW);
+    const saved = Math.max(0, old.overspend - now.overspend);
+    const bar = (label, t, cls) => `<div class="bar-row"><span class="bar-label">${label}</span>
+      <span class="bar">${t.trucks ? `<i class="bar-con" style="flex:${t.contract}"></i><i class="bar-spot" style="flex:${t.spot}"></i>` : `<i class="bar-none"></i>`}</span>
+      <span class="bar-n ${cls}">${t.trucks ? `${pct(t.spotShare)} spot` : "–"}</span></div>`;
+    $("#x-top").innerHTML = `
+      <div class="big-card big-save"><p class="big-label">Saved</p><p class="big-n">${money(saved)}</p><p class="big-sub">${plural(Math.max(0, old.spot - now.spot), "fewer spot truck", "fewer spot trucks")}</p></div>
+      <div class="big-card"><p class="big-label">Spot spent</p><p class="big-n">${money(now.overspend)}</p><p class="big-sub">${plural(now.spot, "spot truck")}</p></div>
+      <div class="big-card wide"><p class="big-label">Spot share</p>${bar("Old way", old, "bad")}${bar("Now", now, now.spotShare <= RULES.spotGoal ? "good" : "bad")}
+        <p class="big-sub">Goal ${pct(RULES.spotGoal)} · 2026 so far ${pct(RULES.spotToday)}</p></div>`;
+    const card = (name, value, sub, good) => `<div class="x-card ${good == null ? "" : good ? "x-good" : "x-bad"}"><p class="x-name">${name}</p><p class="x-n">${value}</p><p class="x-sub">${sub}</p></div>`;
+    const m = s.sales.answerMin;
+    $("#x-cards").innerHTML =
+      card("Sales", m == null ? "–" : m < 60 ? `${Math.max(1, Math.round(m))} min` : `${(m / 60).toFixed(1)} hr`, "to answer · goal 4 hr", m == null ? null : m <= 240) +
+      card("Inventory", `${s.inventory.stranded}`, "truckloads stranded", s.inventory.stranded === 0) +
+      card("Production", pct(s.production.share), `line time used`, null) +
+      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked 3+ days ahead`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null);
   }
 
   return { html, mount, live };
 }
 
 // ---------- Home ----------
-function homeView() {
-  return { html: `<section class="home">
-    <h1>From customer PO to booked truck, with every team on the same page.</h1>
+const homeView = () => ({ html: `<section class="home">
+    <h1>From order to truck, every team on the same page.</h1>
     <div class="two-doors">
-      <a class="door door-cust" href="${link("customer")}"><span class="team-name">Customer HQ</span><span class="team-line">For customers: place a PO, request a change, see where it stands.</span></a>
-      <a class="door" href="${link("ball")}"><span class="team-name">Ball HQ</span><span class="team-line">For Ball's teams: Sales, Inventory, Production and Logistics answer every PO together, then Logistics books the trucks.</span></a>
+      <a class="door door-cust" href="${link("customer")}"><span class="door-name">Customer HQ</span><span class="door-line">Order and change</span></a>
+      <a class="door" href="${link("orders")}"><span class="door-name">Ball HQ</span><span class="door-line">Accept, book, plan</span></a>
     </div>
-    ${sourceNote()}
-  </section>` };
-}
+  </section>` });
 
 // ---------- Boot ----------
-// Never fail silently: any error shows a banner with the fix (usually a hard reload).
-function showBroken(msg) {
-  const el = $("#mode-banner");
-  if (!el) return;
-  el.hidden = false;
-  el.classList.add("banner-bad");
-  el.textContent = `Something went wrong: ${msg}. Reload the page with Cmd+Shift+R. If it keeps happening, add &local to the link to use backup mode.`;
-}
-addEventListener("error", (e) => showBroken(e.message));
-addEventListener("unhandledrejection", (e) => showBroken(e.reason?.message || String(e.reason)));
-if (typeof E.stageOf !== "function") showBroken("this browser loaded an old copy of the app");
-
 async function main() {
-  let role = PARAMS.get("role");
-  let sub = PARAMS.get("tab") || "signoff";
-  if (role in ALIASES) [role, sub = sub] = ALIASES[role];
-  if (role && role !== "customer" && role !== "ball" && !BALL_TABS[role]) role = null;
+  const asked = PARAMS.get("role");
+  let role = asked in ALIASES ? ALIASES[asked] : asked;
+  if (role !== "customer" && !BALL[role]) role = null;
   const portal = role === "customer" ? "customer" : role ? "ball" : "home";
-  ME = portal === "home" ? null : loadMe(portal);
-  if (portal === "ball" && ME && !TEAM_NAME[ME.team]) ME = null;
-  if (portal === "customer" && ME && !SIM_CUSTOMERS[ME.customer]) ME = null;
-  const signingIn = portal !== "home" && (!ME || sessionStorage.getItem("bc_switch") === portal);
-  if (portal === "ball" && role === "ball" && ME && !signingIn) role = HOME_TAB[ME.team];
-  if (role === "logistics" && !LOG_TABS[sub]) sub = "signoff";
   document.body.dataset.portal = portal;
   document.body.dataset.role = role || "home";
+  // Who's using it: a department (Ball) or a company (customer). Old links like ?role=sales pick the department.
+  const savedDept = localStorage.getItem("bc_dept");
+  const state = { items: [], refresh: null,
+    dept: TEAMS.includes(asked) ? asked : asked === "logistics" || ((role === "calendar" || role === "transfers") && !savedDept) ? "logistics"
+      : role === "exec" && !savedDept ? "exec" : DEPT[savedDept] ? savedDept : "sales",
+    company: SIM_CUSTOMERS[localStorage.getItem("bc_company")] ? localStorage.getItem("bc_company") : "Cincinnati, OH" };
+  if (portal === "ball") localStorage.setItem("bc_dept", state.dept);
 
-  // Two separate headers: customers never see Ball HQ.
-  $("#brand").innerHTML = portal === "customer" ? `<span class="wordmark">Ball</span> Customer HQ` : portal === "ball" ? `<span class="wordmark">Ball</span> HQ` : `<span class="wordmark">Ball</span> Findlay pilot`;
+  $("#brand").textContent = portal === "customer" ? "Customer HQ" : portal === "ball" ? "Ball HQ" : "Ball · Findlay pilot";
   $("#brand").href = portal === "customer" ? link("customer") : "./";
-  const drawMe = () => {
-    $("#me").innerHTML = ME && !signingIn ? `<span class="me-name">${esc(ME.name)}</span><span class="me-team">${portal === "ball" ? TEAM_NAME[ME.team] : esc(SIM_CUSTOMERS[ME.customer].name)}</span>
-      <button type="button" class="me-switch" id="me-switch">Switch</button>` : "";
-  };
-  drawMe();
+  $("#who").innerHTML = portal === "customer"
+    ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>`
+    : portal === "ball" ? `<select id="who-sel" aria-label="Department">${Object.entries(DEPT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` : "";
+
   const store = await makeStore();
-  const state = { items: [], refresh: null };
   const drawNav = (items = []) => {
-    if (portal !== "ball" || signingIn) { $("#nav").innerHTML = ""; return; }
-    const count = { sales: teamCount(items, "sales"), inventory: teamCount(items, "inventory"), production: teamCount(items, "production"), logistics: teamCount(items, "logistics") };
-    $("#nav").innerHTML = Object.entries(BALL_TABS).map(([r, name]) =>
-      `<a href="${link(r)}${location.hash}" class="${r === role ? "on" : ""}${r === HOME_TAB[ME.team] ? " mine" : ""}">${name}${count[r] ? ` <span class="tab-count">${count[r]}</span>` : ""}</a>`).join("");
+    if (portal !== "ball") { $("#nav").innerHTML = ""; return; }
+    const mine = TEAMS.includes(state.dept) ? orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[state.dept]).length : 0;
+    const count = { orders: mine, calendar: state.dept === "logistics" ? E.toBookItems(items, NOW).length : 0 };
+    $("#nav").innerHTML = Object.entries(BALL).map(([r, name]) =>
+      `<a href="${link(r)}" class="${r === role ? "on" : ""}">${name}${count[r] ? ` <span class="count">${count[r]}</span>` : ""}</a>`).join("");
   };
+  if ($("#who-sel")) {
+    $("#who-sel").value = portal === "customer" ? state.company : state.dept;
+    $("#who-sel").addEventListener("change", (e) => {
+      if (portal === "customer") { state.company = e.target.value; localStorage.setItem("bc_company", state.company); }
+      else { state.dept = e.target.value; localStorage.setItem("bc_dept", state.dept); }
+      state.refresh();
+    });
+  }
   drawNav();
-  addEventListener("hashchange", () => drawNav(state.items));
   const notes = [];
-  if (!store.live) notes.push(FORCE_LOCAL ? "Backup mode: everything stays on this laptop." : "Local mode: add the Supabase keys in config.js to share across devices.");
-  if (PARAMS.get("today")) notes.push(`Rehearsal date: today is ${fmtDate(NOW)}.`);
-  if (notes.length) { $("#mode-banner").hidden = false; $("#mode-banner").textContent = notes.join(" "); }
-  document.title = portal === "customer" ? "Customer HQ · Ball" : portal === "ball" ? `${signingIn ? "Sign in" : BALL_TABS[role]} · Ball HQ` : "Ball Findlay pilot";
+  if (!store.live) notes.push(FORCE_LOCAL ? "Backup mode: this laptop only" : "Local mode");
+  if (PARAMS.get("today")) notes.push(`Today: ${fmtDate(NOW)}`);
+  if (notes.length) { $("#mode-banner").hidden = false; $("#mode-banner").textContent = notes.join(" · "); }
+  document.title = portal === "customer" ? "Customer HQ" : portal === "ball" ? `${BALL[role]} · Ball HQ` : "Ball · Findlay pilot";
 
   const view = portal === "home" ? homeView()
-    : signingIn ? signInView(portal)
     : portal === "customer" ? customerView(store, state)
-    : role === "pos" ? (() => { const b = board(store, state, null); return { ...b, html: `<div class="dept-head"><div><h1>All POs</h1><p class="lede">Every PO and change, every team's answer, in one place. Open any PO to see its history.</p></div></div>` + b.html }; })()
-    : role === "dashboard" ? dashboardView(store, state)
-    : deptView(store, state, role, sub);
-  $("#app").innerHTML = view.html + (portal === "ball" && !signingIn ? sourceNote() : "");
+    : role === "orders" ? ordersView(store, state)
+    : role === "calendar" ? calendarView(store, state)
+    : role === "transfers" ? transfersView(store, state)
+    : execView(store, state);
+  $("#app").innerHTML = view.html;
   view.mount?.();
-
-  // Switch person or team; "Act as" swaps the team in place.
-  document.addEventListener("click", (e) => {
-    if (e.target.closest("#me-switch")) { sessionStorage.setItem("bc_switch", portal); location.reload(); return; }
-    const as = e.target.closest("[data-act-as]");
-    if (as && ME) {
-      ME = { ...ME, team: as.dataset.actAs };
-      saveMe(portal, ME);
-      drawMe();
-      toast(`Now answering for ${TEAM_NAME[ME.team]}.`);
-      state.refresh();
-    }
-  });
 
   let busy = false, again = false;
   state.refresh = async () => {
@@ -1131,7 +625,7 @@ async function main() {
       drawNav(state.items);
       view.live?.(state.items);
     } catch (err) {
-      if (/fetch|network/i.test(err.message)) toast("Can't reach the database: " + err.message, true);
+      if (/fetch|network/i.test(err.message)) toast("Can't reach the database.", true);
       else { showBroken(err.message); console.error(err); }
     } finally {
       busy = false;
