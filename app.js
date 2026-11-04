@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=34";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=34";
+import * as E from "./engine.js?v=35";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=35";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -603,11 +603,14 @@ function execView(store, state) {
         <span class="from-bar"><i style="width:${(v / top) * 100}%"></i></span><span class="from-n">${money(v)}</span></div>`).join("")}` : "";
     const card = (name, value, sub, good) => `<div class="x-card ${good == null ? "" : good ? "x-good" : "x-bad"}"><p class="x-name">${name}</p><p class="x-n">${value}</p><p class="x-sub">${sub}</p></div>`;
     const m = s.sales.answerMin;
+    const waiting = (t) => orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[t]).length;
+    const wait = (t) => (waiting(t) ? ` · <strong>${waiting(t)} waiting</strong>` : "");
+    const toBook = E.toBookItems(items, NOW).length;
     $("#x-cards").innerHTML =
-      card("Sales", m == null ? "–" : m < 60 ? `${Math.max(1, Math.round(m))} min` : `${(m / 60).toFixed(1)} hr`, "to answer · goal 4 hr", m == null ? null : m <= 240) +
-      card("Inventory", `${s.inventory.stranded}`, "truckloads stranded", s.inventory.stranded === 0) +
-      card("Production", pct(s.production.share), `line time used`, null) +
-      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked 3+ days ahead`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null);
+      card("Sales", m == null ? "–" : m < 60 ? `${Math.max(1, Math.round(m))} min` : `${(m / 60).toFixed(1)} hr`, `to answer · goal 4 hr${wait("sales")}`, m == null ? null : m <= 240) +
+      card("Inventory", `${s.inventory.stranded}`, `truckloads stranded${wait("inventory")}`, s.inventory.stranded === 0) +
+      card("Production", pct(s.production.share), `line time used${wait("production")}`, null) +
+      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked 3+ days ahead${wait("logistics")}${toBook ? ` · <strong>${toBook} to book</strong>` : ""}`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null);
   }
 
   return { html, mount, live };

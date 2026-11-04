@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 1:38:22 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 1:44:02 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -363,7 +363,7 @@ Run: 11/4/2026, 1:38:22 AM · http://localhost:8765/ · backup mode, today = Thu
 - Saved shows $8,410
 
 **Screens:**
-- executive: 67 words, longest line 7 words, main button none · `30-exec-executive.png`
+- executive: 72 words, longest line 14 words, main button none · `30-exec-executive.png`
 
 ## Final data
 | # | Type | Status | What | Date | Booked days |
