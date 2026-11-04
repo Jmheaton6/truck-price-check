@@ -87,6 +87,14 @@ const changesOf = (items, po) => orders(items).filter((x) => isChange(x) && Stri
 // A PO's total: the PO plus the changes Ball accepted.
 const poTotal = (items, po) => po.data.trucks + changesOf(items, po).filter((c) => c.status === "confirmed").reduce((s, c) => s + c.data.trucks, 0);
 
+const ICONS = {
+  check: '<path d="M4.5 10.5l3.5 3.5 7.5-8"/>',
+  x: '<path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>',
+  dot: '<circle cx="10" cy="10" r="4.5"/>',
+  arrow: '<path d="M3.5 10h12M11 5.5l4.5 4.5-4.5 4.5"/>',
+};
+const icon = (name) => `<svg class="ic ic-${name}" viewBox="0 0 20 20" aria-hidden="true">${ICONS[name]}</svg>`;
+
 function toast(msg, bad = false) {
   const t = document.createElement("div");
   t.className = "toast" + (bad ? " toast-bad" : "");
@@ -129,7 +137,7 @@ function customerView(store, state) {
   const html = `<div class="cols cols-cust">
     <section class="panel" id="c-form"></section>
     <div>
-      <section class="panel"><h2>Your POs</h2><div id="c-mine" class="cards"></div></section>
+      <section class="panel"><h2>Your POs</h2><div id="c-mine" class="cards"><p class="empty">Loading…</p></div></section>
       <section class="panel" id="c-score"></section>
     </div>
   </div>`;
@@ -147,8 +155,7 @@ function customerView(store, state) {
     const reasons = `<div class="field"><span class="label">Why?</span>
         <div class="seg" id="c-reason">${REASONS.map((r) => `<button type="button" data-reason="${esc(r)}">${esc(r)}</button>`).join("")}</div></div>`;
     $("#c-form").innerHTML = po ? `
-      <p class="eyebrow">Request a change</p>
-      <h1>Change ${E.poNumber(state.items, po)}</h1>
+      <h1>Request a change to ${E.poNumber(state.items, po)}</h1>
       <p class="lede">Today it's <strong>${plural(poTotal(state.items, po), "truckload")}</strong> for <strong>${esc(fmtDate(E.dateOf(po)))}</strong>. Your change goes through the same Ball review as a new PO.</p>
       ${cansField("New total: how many cans?")}
       ${reasons}
@@ -156,7 +163,6 @@ function customerView(store, state) {
       <button type="button" id="c-send" class="cta">Send change request</button>
       <button type="button" id="c-cancel" class="util quiet">Cancel</button>`
       : `
-      <p class="eyebrow">New PO</p>
       <h1>Place a PO with Ball</h1>
       <label class="field"><span class="label">Your filling plant</span>
         <select id="c-who">${Object.keys(SIM_CUSTOMERS).map((d) => `<option value="${esc(d)}">${esc(custName(d))}</option>`).join("")}</select></label>
@@ -259,8 +265,8 @@ function customerView(store, state) {
       line = `<p class="answer answer-offer">Ball can't do ${esc(fmtDate(it.data.date))}, but can deliver on <strong>${esc(fmtDate(it.data.answer.date))}</strong>. Does that work?</p>
         <div class="card-actions"><button type="button" class="util on" data-reply="yes" data-id="${esc(it.id)}">Accept ${esc(fmtShort(it.data.answer.date))}</button>
         <button type="button" class="util" data-reply="no" data-id="${esc(it.id)}">Decline</button></div>`;
-    } else if (!it.data.scheduled_at) line = `<p class="answer answer-yes">✓ Accepted for ${esc(fmtDate(E.dateOf(it)))}. Ball's Logistics team is booking trucks.</p>`;
-    else line = `<p class="answer answer-yes">✓ Trucks booked for ${esc(fmtDate(E.dateOf(it)))}.</p>`;
+    } else if (!it.data.scheduled_at) line = `<p class="answer answer-yes">${icon("check")}Accepted for ${esc(fmtDate(E.dateOf(it)))}. Ball's Logistics team is booking trucks.</p>`;
+    else line = `<p class="answer answer-yes">${icon("check")}Trucks booked for ${esc(fmtDate(E.dateOf(it)))}.</p>`;
     return bar + line;
   }
 
@@ -302,12 +308,17 @@ async function askCarrier(store, items, lane, date, trucks, forId) {
 
 function reviewView(store, state) {
   let selected = location.hash.slice(1) || null;
+  const moreOpen = new Set(); // which teams' "Why" panels are open
   const html = `<div class="cols cols-team">
-    <section class="panel queue"><h2>POs &amp; changes</h2><div id="r-queue"></div></section>
-    <section class="panel" id="r-detail"></section>
+    <section class="panel queue"><h2>POs and changes</h2><div id="r-queue"><p class="empty">Loading…</p></div></section>
+    <section class="panel" id="r-detail"><p class="empty">Loading…</p></section>
   </div>`;
 
   function mount() {
+    $("#app").addEventListener("toggle", (e) => {
+      const d = e.target.closest?.("[data-more]");
+      if (d) d.open ? moreOpen.add(d.dataset.more) : moreOpen.delete(d.dataset.more);
+    }, true);
     $("#app").addEventListener("click", async (e) => {
       const pick = e.target.closest("[data-pick]");
       if (pick) { selected = pick.dataset.pick; history.replaceState(null, "", "#" + selected); return live(state.items); }
@@ -333,7 +344,7 @@ function reviewView(store, state) {
     const all = TEAMS.every((t) => signoffs[t]?.ok === true);
     await store.update(it.id, { status: all ? "confirmed" : "waiting",
       data: { ...it.data, signoffs, ...(all ? { answer: { kind: "accepted", at: new Date().toISOString() } } : {}) } });
-    toast(all ? "All four teams approved. Accepted: it's in Logistics' queue to schedule." : `${TEAM_NAME[team]} ${ok ? "approved" : "said it can't"}.`);
+    toast(all ? "All four teams approved. Accepted: it's in Logistics' queue to schedule." : `${TEAM_NAME[team]} ${ok ? "approved" : "rejected"} it.`);
   }
 
   async function answer(it, kind, date) {
@@ -344,22 +355,50 @@ function reviewView(store, state) {
     toast(kind === "new_date" ? "Counteroffer sent. The customer sees it now." : kind === "override" ? "Accepted as an exception. It goes to Logistics." : "Declined. The customer sees it now.");
   }
 
+  // Each team: its question, the check's answer, the reasons (folded), and Approve / Reject.
+  // The button matching the check is the dark one; a team can still pick the other.
   function teamBox(it, team, c, signed, extra = "") {
     const s = signed[team];
     const override = s && s.ok !== c.ok;
     const open = it.status === "waiting";
-    return `<div class="tbox ${s ? (s.ok ? "tbox-yes" : "tbox-no") : c.ok ? "" : "tbox-warn"}">
+    const state = s ? (s.ok ? "tbox-yes" : "tbox-no") : c.ok ? "tbox-ok" : "tbox-warn";
+    return `<div class="tbox ${state}">
       <p class="tb-team">${TEAM_NAME[team]}</p>
       <p class="tb-q">${QUESTIONS[team]}</p>
-      <ul class="tb-facts">${c.facts.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
-      <p class="tb-check ${c.ok ? "tb-ok" : "tb-bad"}">App check: ${c.ok ? "✓" : "✗"} ${esc(c.verdict)}</p>
+      <p class="tb-verdict ${c.ok ? "tb-ok" : "tb-bad"}">${icon(c.ok ? "check" : "x")}${esc(c.verdict)}</p>
+      <details class="tb-more" data-more="${team}"${moreOpen.has(team) ? " open" : ""}><summary>Why</summary>
+        <ul class="tb-facts">${c.facts.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></details>
       ${extra}
-      ${s ? `<p class="tb-signed">${s.ok ? "✓ Approved" : "✗ Can't"} · ${esc(time(s.at))}${override ? " · overrode the app" : ""}
-          ${open ? `<button type="button" class="linkish" data-unsign="${team}" data-id="${esc(it.id)}">undo</button>` : ""}</p>`
+      ${s ? `<p class="tb-signed">${icon(s.ok ? "check" : "x")}${s.ok ? "Approved" : "Rejected"} at ${esc(time(s.at))}${override ? " (overrode the check)" : ""}
+          ${open ? `<button type="button" class="linkish" data-unsign="${team}" data-id="${esc(it.id)}">Undo</button>` : ""}</p>`
         : open ? `<div class="tb-btns"><button type="button" class="util${c.ok ? " on" : ""}" data-sign="${team}" data-ok="1" data-id="${esc(it.id)}">Approve</button>
-          <button type="button" class="util${c.ok ? "" : " on"}" data-sign="${team}" data-ok="0" data-id="${esc(it.id)}">Can't</button></div>`
-        : `<p class="tb-signed">Not signed</p>`}
+          <button type="button" class="util${c.ok ? "" : " on"}" data-sign="${team}" data-ok="0" data-id="${esc(it.id)}">Reject</button></div>`
+        : `<p class="tb-signed tb-none">Not signed</p>`}
     </div>`;
+  }
+
+  // The one thing to do next on this PO, with its buttons when Sales must answer.
+  function nextStep(items, it, r, logAsk) {
+    const a = r.checks.alloc;
+    const signed = r.signed;
+    if (it.status === "offered") return { tone: "", html: `<p><strong>Waiting on the customer</strong> to accept ${esc(fmtDate(it.data.answer.date))}.</p>` };
+    if (it.status === "declined") return { tone: "", html: `<p><strong>Declined</strong>${it.data.customer_reply ? " by the customer" : " by Ball"}. Nothing ships.</p>` };
+    if (it.status === "confirmed") return { tone: "ok", html: it.data.scheduled_at
+      ? `<p>${icon("check")}<strong>Done.</strong> Trucks booked: ${chips(a.contract, a.spot)}</p>`
+      : `<p>${icon("check")}<strong>Accepted${it.data.answer?.kind === "override" ? " as an exception" : ""}.</strong> Next, Logistics books the trucks.</p>
+         <a class="util on next-link" href="${link("schedule")}">Go to Schedule trucks ${icon("arrow")}</a>` };
+    if (r.refused.length) {
+      const better = E.betterDate(items, it, NOW);
+      return { tone: "warn", html: `<p><strong>${r.refused.map((t) => TEAM_NAME[t]).join(" and ")} rejected it.</strong> Sales answers the customer:</p>
+        <div class="card-actions">
+          ${better ? `<button type="button" class="util on" data-answer="new_date" data-date="${better.date}" data-id="${esc(it.id)}">Offer ${esc(fmtDate(better.date))} instead</button>` : ""}
+          <button type="button" class="util" data-answer="override" data-id="${esc(it.id)}">Accept anyway${a.spot ? ` (Ball pays ${money(a.overspend)} for spot)` : ""}</button>
+          <button type="button" class="util" data-answer="declined" data-id="${esc(it.id)}">Decline</button>
+        </div>${better ? `<p class="small">${esc(fmtDate(better.date))} passes Production and fits on contract trucks${better.gain ? `, saving ${money(better.gain)}` : ""}.</p>` : `<p class="small">No date in the next few weeks passes every check.</p>`}` };
+    }
+    if (!signed.logistics && logAsk) return { tone: "warn", html: `<p><strong>Logistics:</strong> ask the carrier for ${a.capSpot} more trucks before approving. With a week's notice it can usually add some.</p>` };
+    const waiting = TEAMS.filter((t) => !signed[t]).map((t) => TEAM_NAME[t]);
+    return { tone: "", html: `<p><strong>Waiting on ${waiting.join(", ")}.</strong> When all four approve, the PO is accepted and goes to Logistics.</p>` };
   }
 
   function detail(items, it) {
@@ -368,42 +407,27 @@ function reviewView(store, state) {
     const a = c.alloc;
     // Logistics can ask the carrier for extra trucks right here.
     const asks = items.filter((x) => x.type === "ask" && String(x.data.for) === String(it.id));
+    const logAsk = it.status === "waiting" && a.capSpot > 0 && !asks.some((x) => x.data.trucks > 0);
     let logExtra = asks.map((x) => `<p class="ask-line ask-${x.status}">Carrier: ${esc(x.data.why)}</p>`).join("");
-    if (it.status === "waiting" && a.capSpot > 0 && !asks.some((x) => x.data.trucks > 0))
-      logExtra += `<button type="button" class="util on wide" data-ask="${a.capSpot}" data-id="${esc(it.id)}">Ask the carrier for +${a.capSpot} trucks that week</button>`;
+    if (logAsk) logExtra += `<button type="button" class="util on wide" data-ask="${a.capSpot}" data-id="${esc(it.id)}">Ask the carrier for ${a.capSpot} more trucks</button>`;
 
     const signed = r.signed;
-    const marks = TEAMS.map((t) => `<li class="${signed[t] ? (signed[t].ok ? "m-yes" : "m-no") : ""}">${signed[t] ? (signed[t].ok ? "✓" : "✗") : "○"} ${TEAM_NAME[t]}</li>`).join("");
-    const waitingOn = TEAMS.filter((t) => !signed[t]).map((t) => TEAM_NAME[t]);
-
-    let outcome;
-    if (it.status === "waiting" && r.refused.length) {
-      const better = E.betterDate(items, it, NOW);
-      outcome = `<div class="outcome outcome-warn"><h3>${r.refused.map((t) => TEAM_NAME[t]).join(" and ")} can't do it as asked. Sales answers the customer:</h3>
-        <div class="card-actions">
-          ${better ? `<button type="button" class="util on" data-answer="new_date" data-date="${better.date}" data-id="${esc(it.id)}">Offer ${esc(fmtDate(better.date))} instead (fits, saves ${money(better.gain)})</button>` : ""}
-          <button type="button" class="util" data-answer="override" data-id="${esc(it.id)}">Accept anyway${a.spot ? ` (Ball pays ${money(a.overspend)} spot)` : ""}</button>
-          <button type="button" class="util" data-answer="declined" data-id="${esc(it.id)}">Decline</button>
-        </div>${better ? "" : `<p class="small">No date in the next few weeks clears the checks.</p>`}</div>`;
-    } else if (it.status === "waiting") outcome = `<div class="outcome"><p>Waiting on <strong>${waitingOn.join(", ")}</strong>. When all four approve, it's accepted automatically and goes to Logistics.</p></div>`;
-    else if (it.status === "offered") outcome = `<div class="outcome"><p>Counteroffer sent: <strong>${esc(fmtDate(it.data.answer.date))}</strong>. Waiting on the customer.</p></div>`;
-    else if (it.status === "declined") outcome = `<div class="outcome"><p>Declined${it.data.customer_reply ? " by the customer" : ""}.</p></div>`;
-    else outcome = `<div class="outcome outcome-ok"><p>✓ Accepted${it.data.answer?.kind === "override" ? " as an exception" : ""}${it.data.customer_reply ? " (customer took the new date)" : ""}.
-        ${it.data.scheduled_at ? `Trucks booked: ${chips(a.contract, a.spot)}` : `Next: <a href="${link("schedule")}">Logistics schedules the trucks →</a>`}</p></div>`;
+    const marks = TEAMS.map((t) => `<li class="${signed[t] ? (signed[t].ok ? "m-yes" : "m-no") : ""}">${icon(signed[t] ? (signed[t].ok ? "check" : "x") : "dot")}${TEAM_NAME[t]}</li>`).join("");
+    const next = nextStep(items, it, r, logAsk);
 
     return `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${isChange(it) ? `<span class="pill pill-change">Change request</span>` : ""}
         <time>${esc(time(it.created_at))}</time></div>
       <h1 class="detail-h">${esc(custName(it.data.customer))}</h1>
       <p class="po-what">${whatLine(items, it)} · ${esc(it.data.reason || "")}</p>
-      <ul class="marks">${marks}<li class="m-count">${r.approved} of 4 approved${r.refused.length ? ` · ${r.refused.length} can't` : ""}</li></ul>
-      ${it.data.trucks > 0 ? `<div class="shared shared-${a.color}"><span class="sh-label">The number every team sees</span>
-        <span class="sh-big">${money(a.perTruck)}</span><span class="sh-sub">profit per truck after freight ($3,100 − extra trucking)</span>
-        <span class="sh-split">${chips(a.contract, a.spot)}${a.spot ? ` · spot adds ${money(a.overspend)}` : ""}</span></div>` : ""}
+      <div class="signrow"><ul class="marks">${marks}</ul><span class="m-count">${r.approved} of 4 approved${r.refused.length ? `, ${r.refused.length} rejected` : ""}</span></div>
+      <div class="next next-${next.tone || "plain"}"><p class="next-label">Next step</p>${next.html}</div>
+      ${it.data.trucks > 0 ? `<p class="shared shared-${a.color}">Profit per truckload: <strong>${money(a.perTruck)}</strong>
+        <span class="sh-split">${chips(a.contract, a.spot)}${a.spot ? ` · spot adds ${money(a.overspend)}` : ""}</span>
+        <span class="sh-sub">$3,100 minus extra trucking. Every team sees this number.</span></p>` : ""}
       <div class="tboxes">
         ${teamBox(it, "sales", c.sales, signed)}${teamBox(it, "inventory", c.inventory, signed)}${teamBox(it, "production", c.production, signed)}${teamBox(it, "logistics", c.logistics, signed, logExtra)}
       </div>
-      ${outcome}
-      <button type="button" class="linkish reopen" data-reopen="1" data-id="${esc(it.id)}">Reset this PO (rehearsal)</button>`;
+      <button type="button" class="linkish reopen" data-reopen="1" data-id="${esc(it.id)}">Reset this PO (for rehearsal)</button>`;
   }
 
   function live(items) {
@@ -415,7 +439,7 @@ function reviewView(store, state) {
       const n = TEAMS.filter((t) => it.data.signoffs?.[t]).length;
       return `<button type="button" class="q-row${String(it.id) === String(selected) ? " q-on" : ""}" data-pick="${esc(it.id)}">
         <span class="q-top"><strong>${E.poNumber(items, it)}</strong>${isChange(it) ? " change" : ""} · ${esc(SIM_CUSTOMERS[it.data.customer].name)}</span>
-        <span class="q-sub">${it.data.trucks > 0 ? "+" : "−"}${Math.abs(it.data.trucks)} trucks · ${esc(fmtShort(E.dateOf(it)))}
+        <span class="q-sub">${it.data.trucks > 0 ? "+" : "−"}${plural(Math.abs(it.data.trucks), "truckload")} · ${esc(fmtShort(E.dateOf(it)))}
           <span class="status status-${esc(it.status)}">${STAT[it.status]}${it.status === "waiting" ? ` ${n}/4` : ""}${it.data.scheduled_at ? " · booked" : ""}</span></span>
       </button>`;
     };
@@ -431,10 +455,9 @@ function reviewView(store, state) {
 // ---------- Ball HQ · 2. Schedule trucks (Logistics) ----------
 function scheduleView(store, state) {
   const html = `<section class="panel">
-      <p class="eyebrow">Logistics</p>
       <h1>Schedule trucks</h1>
-      <p class="lede">Accepted POs land here. Book the lane's contract carrier first. If it's full, ask the carrier for extra trucks ahead of time. <strong>Spot is for emergencies</strong> and needs a reason.</p>
-      <div id="s-todo" class="cards"></div>
+      <p class="lede">For Logistics. Accepted POs land here. Book the lane's contract carrier first. If it's full, ask the carrier for extra trucks ahead of time. <strong>Spot is for emergencies</strong> and needs a reason.</p>
+      <div id="s-todo" class="cards"><p class="empty">Loading…</p></div>
     </section>
     <section class="panel"><h2>Booked</h2><div id="s-done"></div></section>`;
 
@@ -477,7 +500,7 @@ function scheduleView(store, state) {
         <h3>${esc(laneName(lane))} · ${esc(SIM_CUSTOMERS[it.data.customer].name)} · ${esc(fmtDate(E.dateOf(it)))}</h3>`;
       if (it.data.trucks < 0) return `<article class="card card-plain">${head}
         <p class="meta">The customer cut ${plural(-it.data.trucks, "truckload")}. Release those contract trucks so the carrier can move its drivers.</p>
-        <div class="card-actions"><button type="button" class="util on" data-book="1" data-id="${esc(it.id)}">Release ${-it.data.trucks} trucks · tell the carrier</button></div></article>`;
+        <div class="card-actions"><button type="button" class="util on" data-book="1" data-id="${esc(it.id)}">Release ${plural(-it.data.trucks, "contract truck")} and tell the carrier</button></div></article>`;
       const d = a.days[0];
       const asked = asks.some((x) => x.data.trucks > 0);
       const askFirst = a.capSpot > 0 && !asked;
@@ -511,11 +534,10 @@ const ZONE = { green: "On plan", yellow: "Watch", red: "Act now" };
 
 function outlookView(store, state) {
   const html = `<section class="panel">
-      <p class="eyebrow">Early warning</p>
-      <h1>Findlay's next 6 weeks, in trucks</h1>
+      <h1>Early warning: Findlay's next 6 weeks, in trucks</h1>
       <p class="lede">POs come in as cans. We turn them into trucks (${num(RULES.cansPerTruck)} cans each) and compare every lane and week with the trucks its contract carrier takes. Logistics sees a problem weeks ahead and calls the carrier then, not on Thursday.</p>
       <p class="legend"><span class="z z-green">On plan</span> within ±10% <span class="z z-yellow">Watch</span> 10–25% <span class="z z-red">Act now</span> over 25% · <span class="b b-spot">n</span> trucks going spot</p>
-      <div id="o-grid"></div>
+      <div id="o-grid"><p class="empty">Loading…</p></div>
     </section>
     <section class="panel"><h2>What Logistics does next</h2><div id="o-actions"></div></section>`;
 
@@ -573,7 +595,6 @@ function transfersView(store, state) {
   const form = { destination: "Mississauga, ON", trucks: 12, date: E.daysBetween(NOW, nextMon) >= RULES.noticeDays ? nextMon : E.addDays(nextMon, 7), pattern: "w3" };
   const html = `<div class="cols cols-plan">
     <section class="panel">
-      <p class="eyebrow">Transfers · Ball's own freight</p>
       <h1>Ship a prebuild in waves</h1>
       <p class="lede">64% of 2026 spot loads were Ball moving its own cans to warehouses. Ball decides when those ship. Send a big run all at once and carriers can't take it. Release it in waves and it fits on contract.</p>
       <div class="row2">
@@ -633,7 +654,7 @@ function transfersView(store, state) {
     const list = items.filter((x) => x.type === "transfer").reverse();
     $("#p-list").innerHTML = list.length ? `<ul class="done-list">${list.map((it) => {
       const a = alloc.get(it.id);
-      return `<li><span class="done-what"><strong>Findlay → ${esc(it.data.destination)}</strong><span class="kind">${it.data.trucks} trucks · ${esc(PATTERNS[it.data.pattern].label.toLowerCase())} from ${esc(fmtDate(it.data.date))}</span></span>
+      return `<li><span class="done-what"><strong>Findlay → ${esc(it.data.destination)}</strong><span class="kind">${plural(it.data.trucks, "truckload")} · ${esc(PATTERNS[it.data.pattern].label.toLowerCase())} from ${esc(fmtDate(it.data.date))}</span></span>
         <span class="done-split">${chips(a.contract, a.spot)}</span><span class="done-money">${money(a.perTruck)}<span class="kind">per truck</span></span></li>`;
     }).join("")}</ul>` : `<p class="empty">None yet.</p>`;
   }
@@ -644,9 +665,9 @@ function transfersView(store, state) {
 // ---------- Ball HQ · Dashboard (Marcelo) ----------
 function dashboardView(store, state) {
   const html = `<section class="hub">
-      <div class="hub-head"><div><p class="eyebrow">Marcelo's dashboard · Findlay pilot</p><h1>Everyone on the same page</h1></div>
+      <div class="hub-head"><div><h1>Marcelo's dashboard</h1><p class="lede">Findlay pilot: every team on the same page.</p></div>
         <span class="live"><span class="pulse"></span>${store.live ? "Live" : "This laptop only"}</span></div>
-      <div id="d-tiles" class="totals"></div>
+      <div id="d-tiles" class="totals"><p class="empty">Loading…</p></div>
       <div id="d-compare"></div>
       <div class="cols cols-plan">
         <section class="panel"><h2>Emergency spot log</h2><div id="d-spot"></div></section>
@@ -675,21 +696,21 @@ function dashboardView(store, state) {
     const avgMin = answered.length ? answered.reduce((s, x) => s + (new Date(x.data.answer.at) - new Date(x.created_at)), 0) / answered.length / 60000 : null;
     const tile = (label, value, sub, cls = "") => `<div class="stat ${cls}"><p class="stat-label">${label}</p><p class="stat-value">${value}</p><p class="stat-sub">${sub}</p></div>`;
     $("#d-tiles").innerHTML =
-      tile("Spot share", now.trucks ? pct(now.spotShare) : "–", `${now.spot} of ${now.trucks} new trucks · goal ≤10%`, "stat-spot") +
+      tile("Spot share", now.trucks ? pct(now.spotShare) : "–", `${now.spot} of ${now.trucks} new truckloads · goal 10% or less`, "stat-spot") +
       tile("Spot cost", money(now.overspend), "paid above contract prices") +
       tile("POs in review", waiting.length, waiting.length ? `still to sign: ${perTeam}` : "nothing waiting on a team", "stat-contract") +
       tile("Time to answer customers", avgMin == null ? "–" : avgMin < 60 ? `${Math.max(1, Math.round(avgMin))} min` : `${(avgMin / 60).toFixed(1)} hr`, "target: under 4 hours");
     $("#d-compare").innerHTML = now.trucks ? `<div class="compare-box">
       <div><p class="stat-label">The old way</p><p class="cmp-n">${old.spot} spot · ${money(old.overspend)}</p><p class="small">Same POs, but nobody asks the carrier ahead and transfers ship in one batch.</p></div>
-      <div class="cmp-arrow">→</div>
+      <div class="cmp-arrow">${icon("arrow")}</div>
       <div><p class="stat-label">With the system</p><p class="cmp-n">${now.spot} spot · ${money(now.overspend)}</p><p class="small">Teams check together, Logistics asks carriers early, transfers go in waves.</p></div></div>` : "";
     const alloc = E.allocate(items, NOW);
     const spotted = os.filter((x) => x.data.scheduled_at && alloc.get(x.id)?.spot);
     $("#d-spot").innerHTML = spotted.length ? `<ul class="feed">${spotted.map((x) => `<li><strong>${E.poNumber(items, x)}</strong> · ${alloc.get(x.id).spot} spot (${money(alloc.get(x.id).overspend)}) · ${esc(x.data.spot_reason || "")}</li>`).join("")}</ul>`
       : `<p class="empty">No spot trucks booked. Spot is for emergencies only.</p>`;
     const line = (it) => {
-      if (it.type === "order") return `<strong>${E.poNumber(items, it)}</strong>${isChange(it) ? " change" : ""} · ${esc(SIM_CUSTOMERS[it.data.customer].name)} ${it.data.trucks > 0 ? "+" : "−"}${Math.abs(it.data.trucks)} trucks · ${{ waiting: `in review (${TEAMS.filter((t) => it.data.signoffs?.[t]).length}/4)`, offered: "counteroffer out", confirmed: it.data.scheduled_at ? "trucks booked" : "accepted", declined: "declined" }[it.status]}`;
-      if (it.type === "transfer") return `<strong>Transfer</strong> ${it.data.trucks} trucks to ${esc(it.data.destination)} · ${esc(PATTERNS[it.data.pattern].label.toLowerCase())}`;
+      if (it.type === "order") return `<strong>${E.poNumber(items, it)}</strong>${isChange(it) ? " change" : ""} · ${esc(SIM_CUSTOMERS[it.data.customer].name)} ${it.data.trucks > 0 ? "+" : "−"}${plural(Math.abs(it.data.trucks), "truckload")} · ${{ waiting: `in review (${TEAMS.filter((t) => it.data.signoffs?.[t]).length}/4)`, offered: "counteroffer out", confirmed: it.data.scheduled_at ? "trucks booked" : "accepted", declined: "declined" }[it.status]}`;
+      if (it.type === "transfer") return `<strong>Transfer</strong> ${plural(it.data.trucks, "truckload")} to ${esc(it.data.destination)} · ${esc(PATTERNS[it.data.pattern].label.toLowerCase())}`;
       return `<strong>Carrier</strong> ${esc(it.data.destination)}, week of ${weekLabel(it.data.week)}: ${esc(it.data.why || it.status)}`;
     };
     $("#d-feed").innerHTML = items.length ? [...items].reverse().slice(0, 30).map((it) => `<li><time>${esc(time(it.created_at))}</time> ${line(it)}</li>`).join("") : `<li class="empty">Nothing yet. Start at Customer HQ.</li>`;
@@ -701,7 +722,6 @@ function dashboardView(store, state) {
 // ---------- Home ----------
 function homeView() {
   return { html: `<section class="home">
-    <p class="eyebrow">Ball · Findlay pilot</p>
     <h1>From customer PO to booked truck, with every team on the same page.</h1>
     <div class="two-doors">
       <a class="door door-cust" href="${link("customer")}"><span class="team-name">Customer HQ</span><span class="team-line">For customers: place a PO, request a change, see where it stands.</span></a>

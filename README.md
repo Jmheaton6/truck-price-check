@@ -34,3 +34,11 @@ One customer change, followed from order to truck. Customers, Ball's four teams 
 4. Between rounds: Marcelo's hub → **New round** → PIN.
 
 Tests: `node --test tests/engine.test.mjs`
+
+## Words (use the same ones everywhere)
+- **Truckload:** the size of a PO or change (200,000 cans).
+- **Contract truck / spot truck:** how a truckload ships. Contract = the lane's contracted carrier at the set rate. Spot = a last-minute truck at market price.
+- **Approve / Reject:** a team's sign-off. Four approvals accept the PO.
+- **Book:** Logistics schedules the trucks for an accepted PO.
+
+Design pass (v22) follows the Impeccable skill's rules for working tools (github.com/pbakaus/impeccable), keeping the Noom house style: no small all-caps labels over headings, no colored side bars, drawn icons, sans tabular numbers in data, visible hover and focus, and "Loading…" while data arrives.
