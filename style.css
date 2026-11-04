@@ -250,3 +250,5 @@ input:hover, select:hover { border-color: var(--muted); }
 .cal th.open-h, .cal td.open { width: 56px; }
 .cal td.open { background: transparent; text-align: center; vertical-align: middle; font: 400 20px var(--serif); color: var(--teal); }
 .cal td.open-0 { color: var(--red); }
+.by { margin-left: auto; color: var(--muted); }
+.by-soon { color: var(--red); font-weight: 700; }

@@ -404,7 +404,7 @@ function calendarView(store, state) {
       if (c) {
         const canAsk = c.fixable > 0 && E.daysBetween(NOW, day) >= RULES.carrierFlexNoticeDays;
         return `<button type="button" class="linkish back" id="side-back">${icon("left")}To book</button>
-          <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.destination)}</p>
+          <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.kind === "order" ? `${custName(row.lane.destination)} · ${row.lane.destination}` : row.lane.destination)}${c.toBook ? ` · book by ${esc(fmtShort(E.addDays(day, -RULES.noticeDays)))}` : ""}</p>
           <ul class="moves">${c.moves.map((m) => `<li><span>${m.it.type === "order" ? `${E.poNumber(items, m.it)} · ${esc(custName(m.it.data.customer))}` : "Transfer"}</span>
             <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}${m.booked ? ` ${icon("check")}` : ""}</span></li>`).join("") || `<li class="empty">Nothing moving.</li>`}</ul>
           ${isLog && c.toBook ? `<button type="button" class="cta" data-book="1" data-cellkey="${esc(pick)}">Book ${plural(c.toBook, "truck")}</button>` : ""}
@@ -421,7 +421,8 @@ function calendarView(store, state) {
     return `<h2>To book</h2><ul class="tobook">${list.map((x) => `<li class="tb-row">
         <button type="button" class="row" data-cell="${esc(x.lane.key)}@${x.first}">
           <span class="row-top"><strong>${esc(name(x))}</strong></span>
-          <span class="row-sub">${esc(when(x))} · <span class="t-con">${x.contract}</span>${x.spot ? ` <span class="t-spot">${x.spot} spot</span>` : ""}</span></button>
+          <span class="row-sub">${esc(when(x))} · <span class="t-con">${x.contract}</span>${x.spot ? ` <span class="t-spot">${x.spot} spot</span>` : ""}
+            <span class="by${E.daysBetween(NOW, x.bookBy) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(x.bookBy))}</span></span></button>
         ${isLog ? `<button type="button" class="util small" data-bookitem="${esc(x.it.id)}">Book</button>` : ""}</li>`).join("")}</ul>
       ${isLog ? (list.length > 1 ? `<button type="button" class="cta" data-bookall="1">Book all ${list.reduce((s, x) => s + x.trucks, 0)}</button>` : "") : `<p class="small">Logistics books these.</p>`}`;
   }
