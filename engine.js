@@ -5,7 +5,7 @@
 // (it needs 3+ days' notice), then backup 1, then backup 2. If none has room that day, a customer gets a
 // counteroffer date; if they keep their date, it goes spot and they pay the spot premium as an expedite fee.
 // Spot is the last resort.
-import { LANES, MONTHLY } from "./lanes.js?v=48";
+import { LANES, MONTHLY } from "./lanes.js?v=49";
 export { MONTHLY };
 
 export const RULES = {
@@ -154,18 +154,25 @@ function tender(moves, now, extra = new Map()) {
   for (const m of moves) {
     let left = m.n;
     const got = [];
-    for (const c of m.lane.routing) {
-      if (!left) break;
-      if (c.tier === 0 && daysBetween(m.tenderOn, m.day) < RULES.noticeDays) continue;
-      const dk = `${m.lane.key}|${c.tier}|${m.day}`, wk = `${m.lane.key}|${c.tier}|${weekKey(m.day)}`;
-      const room = Math.max(0, Math.min(c.daily - (usedDay.get(dk) || 0), c.weekly - (usedWeek.get(wk) || 0)));
-      const take = Math.min(left, room);
-      if (!take) continue;
+    // A carrier's room that day: its daily share and what's left of its weekly commitment. The primary needs 3+ days' notice.
+    const keys = (c) => [`${m.lane.key}|${c.tier}|${m.day}`, `${m.lane.key}|${c.tier}|${weekKey(m.day)}`];
+    const roomOf = (c) => {
+      if (c.tier === 0 && daysBetween(m.tenderOn, m.day) < RULES.noticeDays) return 0;
+      const [dk, wk] = keys(c);
+      return Math.max(0, Math.min(c.daily - (usedDay.get(dk) || 0), c.weekly - (usedWeek.get(wk) || 0)));
+    };
+    const give = (c, take) => {
+      const [dk, wk] = keys(c);
       usedDay.set(dk, (usedDay.get(dk) || 0) + take);
       usedWeek.set(wk, (usedWeek.get(wk) || 0) + take);
       got.push({ name: c.name, short: c.short, tier: c.tier, n: take });
       left -= take;
-    }
+    };
+    // The whole load goes to the first carrier in the routing guide that can take all of it.
+    const whole = m.lane.routing.find((c) => roomOf(c) >= m.n);
+    if (whole) give(whole, m.n);
+    // No one can: split it down the routing guide.
+    else for (const c of m.lane.routing) { const take = Math.min(left, roomOf(c)); if (take) give(c, take); if (!left) break; }
     // Then the extra trucks Logistics lined up for that week (early warning), any day of the week.
     (extra.get(`${m.lane.key}|${weekKey(m.day)}`) || []).forEach((x, i) => {
       const k = `${m.lane.key}|${weekKey(m.day)}|${i}`, take = Math.min(left, x.n - (usedExtra.get(k) || 0));

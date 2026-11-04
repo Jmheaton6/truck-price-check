@@ -229,3 +229,13 @@ test("early warning: warehouse lanes show only with a prebuild, and flag only in
   assert.deepEqual(((w) => [w.trucks, w.zone])(r.weeks[2]), [12, "R"]);
   assert.deepEqual(r.weeks.filter((w) => w.wk !== 2).map((w) => w.zone), ["G", "G", "G", "G", "G"]);
 });
+
+test("one carrier takes the whole load when it can; otherwise it splits down the routing guide", () => {
+  const cars = (it, items = [it]) => E.allocate(items, NOW).get(it.id).days[0].carriers.map((c) => `${c.short} ${c.n}`);
+  // Trenton: C.H. Robinson 4/day, Sage 3/day. 3 trucks → all to the primary.
+  assert.deepEqual(cars(prebuild("Trenton, OH", 3, "2026-11-16", [{ day: "2026-11-16", n: 3 }])), ["C.H. Robinson 3"]);
+  const a = prebuild("Trenton, OH", 3, "2026-11-16", [{ day: "2026-11-16", n: 3 }]), b = prebuild("Trenton, OH", 3, "2026-11-16", [{ day: "2026-11-16", n: 3 }]);
+  assert.deepEqual(cars(b, [a, b]), ["Sage 3"]); // primary has only 1 left, so backup 1 takes all 3
+  // Coca-Cola: every carrier has 1 a day, so 3 trucks split.
+  assert.deepEqual(cars(allAccept([], po(COKE, 3, "2026-11-19"))), ["Dedicated 1", "C.H. Robinson 1", "Sage 1"]);
+});
