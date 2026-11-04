@@ -110,7 +110,11 @@ test("cuts free trucks; a cut inside the freeze strands cans", () => {
   const after = po("Columbus, OH", 4, "2026-11-18");
   assert.equal(E.allocate([base, after], NOW).get(after.id).contract, 0);   // 6 forecast, all used
   const cut = change(base, -4, "confirmed");
-  assert.equal(E.allocate([base, cut, after], NOW).get(after.id).contract, 4);
+  const a = E.allocate([base, cut, after], NOW);
+  assert.equal(a.get(base.id).trucks, 2);          // the cut shrinks the order itself
+  assert.equal(a.get(after.id).contract, 4);
+  const row = E.calendar([base, cut, after], NOW, 2).find((r) => r.lane.destination === "Columbus, OH" && r.lane.kind === "order");
+  assert.equal(row.open, 0);                        // 6 forecast room: 2 + 4 claimed
   const near = po("Cincinnati, OH", 4, "2026-11-08", "confirmed");
   const nearCut = change(near, -2);
   assert.equal(E.checks([near, nearCut], nearCut, NOW).inventory.ok, false);

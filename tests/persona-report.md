@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 1:11:10 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 1:18:04 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -95,11 +95,11 @@ Run: 11/4/2026, 1:11:10 AM · http://localhost:8765/ · backup mode, today = Thu
 
 **Screens:**
 - order accepted: 59 words, longest line 6 words, main button visible · `07-logistics-order-accepted.png`
-- calendar: 68 words, longest line 10 words, main button none · `08-logistics-calendar.png`
+- calendar: 69 words, longest line 9 words, main button none · `08-logistics-calendar.png`
 - transfers: 57 words, longest line 10 words, main button visible · `09-logistics-transfers.png`
 - transfer planned: 70 words, longest line 14 words, main button visible · `10-logistics-transfer-planned.png`
-- calendar with transfer: 68 words, longest line 10 words, main button none · `11-logistics-calendar-with-transfer.png`
-- after book all: 66 words, longest line 5 words, main button none · `12-logistics-after-book-all.png`
+- calendar with transfer: 67 words, longest line 8 words, main button none · `11-logistics-calendar-with-transfer.png`
+- after book all: 67 words, longest line 5 words, main button none · `12-logistics-after-book-all.png`
 
 ## Pat (customer, Customer A buyer)
 *Promo got bigger: change the order to 2.8 million cans.*

@@ -88,7 +88,9 @@ const stageChip = (it, forCustomer = false) => {
   return `<span class="chip chip-${st}">${label}</span>`;
 };
 // What a customer reads when a department says no.
-const CUSTOMER_WHY = { sales: "Over your forecast", inventory: "Cans already made", production: "No line time that week", logistics: "No trucks that day" };
+const customerWhy = (d) => d.team === "sales" ? (/^Only/.test(d.why) ? "Too close to delivery" : "Over your forecast")
+  : d.team === "production" ? (/freeze/i.test(d.why) ? "Too close to make" : "No line time that week")
+  : d.team === "inventory" ? "Cans already made" : "No trucks that day";
 
 function toast(msg, bad = false) {
   document.querySelectorAll(".toast").forEach((x) => x.remove());
@@ -208,7 +210,7 @@ function customerView(store, state) {
     if (st === "denied" && it.data.denied) {
       const retried = orders(items).some((x) => String(x.data.retry_of) === String(it.id));
       const better = retried ? null : E.betterDate(items, it, NOW);
-      extra = `<p class="why">${CUSTOMER_WHY[it.data.denied.team]}</p>
+      extra = `<p class="why">${customerWhy(it.data.denied)}</p>
         ${better ? `<button type="button" class="util on small" data-retry="${esc(it.id)}" data-date="${better.date}">Try ${esc(fmtDate(better.date))}</button>` : ""}`;
     }
     return `<div class="o-line"><span class="o-what">${what} · ${esc(fmtDate(it.data.date))}</span>${stageChip(it, true)}</div>${extra}`;
@@ -413,8 +415,9 @@ function calendarView(store, state) {
     // What to book: one row per order or transfer, soonest first, each with Book; Book all at the bottom.
     const list = E.toBookItems(items, NOW);
     if (!list.length) return `<h2>To book</h2><p class="empty">All booked.</p>`;
-    const name = (x) => (x.it.type === "order" ? `${E.poNumber(items, x.it)} · ${custName(x.lane.destination)}` : `Transfer · ${x.lane.destination}`);
-    const when = (x) => (x.first === x.last ? `${dow(x.first)} ${fmtShort(x.first)}` : `${fmtShort(x.first)}–${fmtShort(x.last)}`);
+    const name = (x) => (x.it.type === "order" ? `${E.poNumber(items, x.it)} ${custName(x.lane.destination)}` : x.lane.destination.split(",")[0]);
+    const when = (x) => (x.it.type === "transfer" ? "Transfer · " : "") + (x.first === x.last ? `${dow(x.first)} ${fmtShort(x.first)}`
+      : E.atNoon(x.first).getMonth() === E.atNoon(x.last).getMonth() ? `${fmtShort(x.first)}–${E.atNoon(x.last).getDate()}` : `${fmtShort(x.first)}–${fmtShort(x.last)}`);
     return `<h2>To book</h2><ul class="tobook">${list.map((x) => `<li class="tb-row">
         <button type="button" class="row" data-cell="${esc(x.lane.key)}@${x.first}">
           <span class="row-top"><strong>${esc(name(x))}</strong></span>
@@ -437,9 +440,9 @@ function calendarView(store, state) {
           const key = `${r.lane.key}@${c.day}`;
           const cls = [c.spot ? "c-spot" : c.toBook ? "c-book" : "", c.day < NOW ? "c-past" : "", pick === key ? "c-pick" : ""].join(" ");
           return `<td class="${cls}"><button type="button" class="cell" data-cell="${esc(key)}" aria-label="${esc(r.lane.destination)} ${esc(fmtDate(c.day))}">${squares(c.moves)}</button></td>`;
-        }).join("")}</tr>`).join("");
+        }).join("")}<td class="open${r.open ? "" : " open-0"}" title="Contract trucks still free this week">${r.open}</td></tr>`).join("");
     $("#cal").innerHTML = `<div class="table-wrap"><table class="cal">
-      <thead><tr><th></th>${days.map((d) => `<th class="${d === NOW ? "today" : ""}">${esc(dow(d))} <span>${E.atNoon(d).getDate()}</span></th>`).join("")}</tr></thead>
+      <thead><tr><th></th>${days.map((d) => `<th class="${d === NOW ? "today" : ""}">${esc(dow(d))} <span>${E.atNoon(d).getDate()}</span></th>`).join("")}<th class="open-h">Open</th></tr></thead>
       <tbody>${group("order", "Customers")}${group("transfer", "Warehouses")}</tbody></table></div>`;
     $("#cal-side").innerHTML = side(items, rows);
   }
@@ -595,7 +598,7 @@ async function main() {
   if (portal === "ball") localStorage.setItem("bc_dept", state.dept);
 
   $("#brand").textContent = portal === "customer" ? "Customer HQ" : portal === "ball" ? "Ball HQ" : "Ball · Findlay pilot";
-  $("#brand").href = portal === "customer" ? link("customer") : "./";
+  $("#brand").href = portal === "customer" ? link("customer") : "./" + link("").replace(/^\?role=&?/, "?").replace(/^\?$/, "");
   $("#who").innerHTML = portal === "customer"
     ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>`
     : portal === "ball" ? `<select id="who-sel" aria-label="Department">${Object.entries(DEPT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` : "";

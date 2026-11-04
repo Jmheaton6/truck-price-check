@@ -62,7 +62,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 60px; }
 .cols { display: grid; gap: 16px; align-items: start; }
 .cols-cust { grid-template-columns: 420px 1fr; max-width: 1000px; margin: 0 auto; }
 .cols-orders { grid-template-columns: 320px 1fr; }
-.cols-cal { grid-template-columns: 1fr 300px; }
+.cols-cal { grid-template-columns: 1fr 320px; }
 .cols-plan { grid-template-columns: 1.3fr 1fr; }
 
 /* ---------- Controls ---------- */
@@ -247,3 +247,6 @@ input:hover, select:hover { border-color: var(--muted); }
 .d-btns + .ask, .ask { align-self: flex-start; }
 .dcard .ask { width: 100%; min-height: 38px; }
 .dcard .util.on.ask { background: var(--teal); border-color: var(--teal); }
+.cal th.open-h, .cal td.open { width: 56px; }
+.cal td.open { background: transparent; text-align: center; vertical-align: middle; font: 400 20px var(--serif); color: var(--teal); }
+.cal td.open-0 { color: var(--red); }

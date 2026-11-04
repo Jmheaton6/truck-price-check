@@ -155,17 +155,18 @@ export function allocate(items, now, opts = {}) {
   const extras = opts.oldWay ? new Map() : carrierExtras(items, now);
   const usedWeek = new Map();
   const usedDay = new Map();
-  const freed = new Map(); // cuts free their trucks for everyone that week
+  // An accepted cut shrinks the order it cuts (same date), so those trucks are never booked.
+  const cutOf = new Map();
   for (const it of list) {
-    if (it.data.trucks >= 0) continue;
-    const k = `${itemLane(it).key}|${weekIndex(dateOf(it), now)}`;
-    freed.set(k, (freed.get(k) || 0) - it.data.trucks);
+    if (it.type !== "order" || it.data.trucks >= 0 || it.status !== "confirmed") continue;
+    const parent = list.find((x) => String(x.id) === String(it.data.parent));
+    if (parent && dateOf(parent) === dateOf(it)) cutOf.set(parent.id, (cutOf.get(parent.id) || 0) - it.data.trucks);
   }
   const out = new Map();
   for (const it of list) {
     const lane = itemLane(it);
     if (!lane) continue;
-    const trucks = it.data.trucks;
+    const trucks = it.data.trucks > 0 ? Math.max(0, it.data.trucks - (cutOf.get(it.id) || 0)) : it.data.trucks;
     const date = dateOf(it);
     if (trucks < 0) { out.set(it.id, { lane, date, trucks, cut: -trucks, contract: 0, spot: 0, days: [], overspend: 0 }); continue; }
     const pattern = opts.oldWay ? "day" : patternOf(it);
@@ -176,7 +177,7 @@ export function allocate(items, now, opts = {}) {
       const extra = extras.get(wKey) || 0;
       const cover = lane.perWeek + extra;
       const earlier = usedWeek.get(wKey) || 0;
-      const weekRoom = Math.max(0, cover - bookedTrucks(lane, wk) + (freed.get(wKey) || 0) - earlier);
+      const weekRoom = Math.max(0, cover - bookedTrucks(lane, wk) - earlier);
       // One-day limit: Ball's own transfers only. Customers set their delivery days; carriers plan those lanes by the week.
       const dayRoom = lane.kind === "order" ? Infinity : Math.max(0, lane.perDay + extra - (usedDay.get(dKey) || 0));
       const bookedOn = it.data.booked?.[day] ? dayOfTs(it.data.booked[day]) : null;
@@ -327,7 +328,9 @@ export function calendar(items, now, wk) {
       }
     }
     const extra = extras.get(`${lane.key}|${wk}`) || 0;
-    return { lane, extra, cells };
+    const claimed = cells.reduce((s, c) => s + c.moves.reduce((t, m) => t + m.contract, 0), 0);
+    const open = Math.max(0, lane.perWeek + extra - bookedTrucks(lane, wk) - claimed);
+    return { lane, extra, open, cells };
   });
 }
 // Days Logistics still has to book, soonest first: book by (day − 3).
