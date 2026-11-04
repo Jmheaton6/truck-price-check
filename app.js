@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=24";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=24";
+import * as E from "./engine.js?v=25";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=25";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, SIM_LINE_TIME, PATTERNS, TEAMS, QUESTIONS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -203,14 +203,18 @@ function signInView(portal) {
 // ---------- Customer HQ ----------
 const CUST_STEPS = ["Sent", "Ball reviews", "Accepted", "Trucks booked"];
 const CUST_AT = { review: 2, offered: 2, accepted: 3, booked: 4 };
+const weekName = (wk) => (wk === 0 ? `This week (${weekLabel(E.weekKey(NOW))})` : weekLabel(E.addDays(E.weekKey(NOW), wk * 7)));
+const millions = (trucks) => +(trucks * RULES.cansPerTruck / 1e6).toFixed(1);
 
 function customerView(store, state) {
+  const customer = ME.customer;
   const form = {
+    mode: "po",                              // "po" or "outlook"
     cans: 2000000, reason: "Promotion",
     date: E.addDays(E.weekKey(NOW), 14 + 4), // Thursday, two weeks out
     changeOf: null,                          // PO id when requesting a change
+    outlook: null,                           // truckloads per week while editing the outlook
   };
-  const customer = ME.customer;
   const html = `<div class="cols cols-cust">
     <section class="panel" id="c-form"></section>
     <div>
@@ -221,9 +225,20 @@ function customerView(store, state) {
 
   const trucks = () => E.trucksFromCans(form.cans);
   const changing = () => (form.changeOf ? byId(state.items, form.changeOf) : null);
+  const fcNow = (wk) => E.forecastOf(state.items, customer, wk, NOW);
+  // The PO or change as it would be saved, so the engine can say what happens to it.
+  function draft() {
+    const po = changing();
+    const delta = po ? trucks() - poTotal(state.items, po) : trucks();
+    const data = po ? { kind: "change", parent: po.id, customer, trucks: delta, date: E.dateOf(po), signoffs: {} }
+      : { kind: "po", customer, trucks: trucks(), date: form.date, signoffs: {} };
+    return { id: "draft", type: "order", status: "waiting", created_at: "￿", data };
+  }
 
   function drawForm() {
     const po = changing();
+    const tabs = po ? "" : `<div class="seg c-mode" id="c-mode"><button type="button" data-mode="po">Place a PO</button><button type="button" data-mode="outlook">Share your 6-week outlook</button></div>`;
+    if (form.mode === "outlook" && !po) return drawOutlook(tabs);
     const presets = [400000, 1000000, 2000000, 4000000];
     const cansField = (label) => `<label class="field"><span class="label">${label}</span>
         <input id="c-cans" type="number" inputmode="numeric" min="200000" max="20000000" step="200000">
@@ -233,45 +248,84 @@ function customerView(store, state) {
         <div class="seg" id="c-reason">${REASONS.map((r) => `<button type="button" data-reason="${esc(r)}">${esc(r)}</button>`).join("")}</div></div>`;
     $("#c-form").innerHTML = po ? `
       <h1>Change ${E.poNumber(state.items, po)}</h1>
-      <p class="lede">Today it's <strong>${plural(poTotal(state.items, po), "truckload")}</strong> for <strong>${esc(fmtDate(E.dateOf(po)))}</strong>. Your change goes through the same Ball review as a new PO.</p>
+      <p class="lede">Today it's <strong>${plural(poTotal(state.items, po), "truckload")}</strong> for <strong>${esc(fmtDate(E.dateOf(po)))}</strong>.</p>
       ${cansField("New total: how many cans?")}
       ${reasons}
-      <div id="c-rules" class="rules"></div>
+      <div id="c-rules"></div>
       <button type="button" id="c-send" class="cta">Send change request</button>
       <button type="button" id="c-cancel" class="util quiet">Cancel</button>`
-      : `
+      : `${tabs}
       <h1>Place a PO with Ball</h1>
       <p class="lede">Ordering for <strong>${esc(custName(customer))}</strong>.</p>
       ${cansField("How many cans?")}
       <label class="field"><span class="label">Delivery date</span>
         <input id="c-date" type="date" min="${NOW}" max="${LAST_DAY}"></label>
       ${reasons}
-      <div id="c-rules" class="rules"></div>
+      <div id="c-rules"></div>
       <button type="button" id="c-send" class="cta">Send PO to Ball</button>`;
     $("#c-cans").addEventListener("input", (e) => { form.cans = Math.max(1, +e.target.value || 0); paint(); });
     $("#c-date")?.addEventListener("change", (e) => { form.date = e.target.value < NOW ? NOW : e.target.value > LAST_DAY ? LAST_DAY : e.target.value; paint(); });
     paint();
   }
 
+  // Share your outlook: what you expect to order each of the next 6 weeks.
+  function drawOutlook(tabs) {
+    if (!form.outlook) form.outlook = Array.from({ length: RULES.weeks }, (_, wk) => fcNow(wk));
+    const last = E.latestOutlook(state.items, customer);
+    $("#c-form").innerHTML = `${tabs}
+      <h1>Your next 6 weeks</h1>
+      <p class="lede">Tell Ball what you expect to order, as soon as you know: promotions, filling-line changes, new business. Ball turns it into trucks and lines up carriers weeks ahead. It isn't an order.</p>
+      <table class="ol-table"><thead><tr><th>Week</th><th>Million cans</th><th>Truckloads</th><th>Change</th></tr></thead>
+        <tbody>${form.outlook.map((n, wk) => `<tr><th scope="row">${esc(weekName(wk))}</th>
+          <td><input type="number" class="ol-in" data-wk="${wk}" min="0" max="40" step="0.2" value="${millions(n)}"></td>
+          <td class="ol-n" id="ol-n-${wk}"></td><td id="ol-d-${wk}"></td></tr>`).join("")}</tbody></table>
+      <div class="field"><span class="label">What's driving it?</span>
+        <div class="seg" id="c-reason">${REASONS.map((r) => `<button type="button" data-reason="${esc(r)}">${esc(r)}</button>`).join("")}</div></div>
+      <p class="small">${last ? `Last shared ${esc(stamp(last.created_at))}${last.data.by?.name ? ` by ${esc(last.data.by.name)}` : ""}.` : "Not shared yet: Ball is planning on your quarterly forecast."} Changes 2+ weeks ahead let Ball plan the cans and the trucks.</p>
+      <button type="button" id="c-share" class="cta">Share outlook with Ball</button>`;
+    $("#c-form").querySelectorAll(".ol-in").forEach((inp) => inp.addEventListener("input", (e) => {
+      form.outlook[+e.target.dataset.wk] = Math.max(0, Math.round((+e.target.value || 0) * 1e6 / RULES.cansPerTruck));
+      paintOutlook();
+    }));
+    paintOutlook();
+  }
+  function paintOutlook() {
+    document.querySelectorAll("#c-reason button").forEach((b) => b.classList.toggle("on", b.dataset.reason === form.reason));
+    form.outlook.forEach((n, wk) => {
+      const was = fcNow(wk);
+      $(`#ol-n-${wk}`).textContent = n;
+      $(`#ol-d-${wk}`).innerHTML = n === was ? `<span class="meta-sm">same</span>` : `<span class="delta ${n > was ? "up" : "down"}">${n > was ? "+" : "−"}${Math.abs(n - was)}</span>`;
+    });
+  }
+
   function paint() {
+    if (form.mode === "outlook" && !changing()) return paintOutlook();
     const po = changing();
     if ($("#c-date")) $("#c-date").value = form.date;
     $("#c-cans").value = form.cans;
-    document.querySelectorAll("#c-reason button").forEach((b) => b.classList.toggle("on", b.dataset.reason === form.reason));
+    document.querySelectorAll("#c-reason button, #c-mode button").forEach((b) => b.classList.toggle("on", b.dataset.reason === form.reason || b.dataset.mode === form.mode));
     const date = po ? E.dateOf(po) : form.date;
     const now = po ? poTotal(state.items, po) : 0;
     const delta = trucks() - now;
     $("#c-trucks").innerHTML = po
       ? `= <strong>${plural(trucks(), "truckload")}</strong>: that's <strong>${delta > 0 ? "+" : delta < 0 ? "−" : ""}${Math.abs(delta)}</strong> vs. today's ${now}`
       : `= <strong>${plural(trucks(), "truckload")}</strong> at ${num(RULES.cansPerTruck)} cans per truck`;
-    const cust = SIM_CUSTOMERS[customer];
-    const wk = E.weekIndex(date, NOW);
-    const fc = cust.forecast[wk] ?? cust.forecast.at(-1);
-    const band = Math.max(1, Math.round(fc * RULES.flexBand));
+    // What will happen when they send it: confirmed instantly, or reviewed by Ball's teams (and why).
+    if (po && !delta) { $("#c-rules").innerHTML = `<p class="small top0">Type the new total above to see what happens.</p>`; return; }
+    const d = draft();
+    const items = [...state.items, d];
+    const au = E.autoApprove(items, d, NOW);
+    const b = E.bandCheck(items, d, NOW);
     const days = E.daysBetween(NOW, date);
-    $("#c-rules").innerHTML = `<p><strong>You forecast ${plural(fc, "truckload")} for the week of ${weekLabel(E.weekKey(date))}.</strong> Orders within ${fc - band}–${fc + band} (±10%) are routine.</p>
-      <p><strong>Delivery is ${plural(days, "day")} away.</strong> Changes inside ${RULES.noticeDays} days of delivery are hard to fill.</p>
-      <p class="small">Ball's four teams review it together and answer within 4 hours (target).</p>`;
+    const why = [];
+    if (!au.checks.sales.ok) why.push(days < RULES.noticeDays ? `Delivery is only ${plural(days, "day")} away (changes inside ${RULES.noticeDays} days are hard to fill).`
+      : `That week would be ${b.weekTotal} truckloads vs. your outlook of ${b.fc}. Within ${b.fc - b.band}–${b.fc + b.band} (±10%) is routine.`);
+    if (!au.checks.inventory.ok || !au.checks.production.ok) why.push("Ball needs to check it can make the cans in time.");
+    if (!au.checks.logistics.ok) why.push("Ball needs to line up trucks for it.");
+    if (au.tier !== "Priority") why.push(`Your POs are reviewed by Ball's teams until ${pct(RULES.priorityAt)} of your orders stay within your outlook.`);
+    $("#c-rules").innerHTML = au.ok
+      ? `<div class="preview preview-ok"><p class="pv-h">${icon("check")}Confirmed instantly</p><p>It's within your flex band and Ball has the cans and trucks. Priority customers skip the review.</p></div>`
+      : `<div class="preview"><p class="pv-h">Goes to Ball's teams for review</p><ul>${why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul><p class="small">Sales, Inventory, Production and Logistics answer within 4 hours (target).</p></div>`;
   }
 
   function mount() {
@@ -279,6 +333,7 @@ function customerView(store, state) {
     $("#app").addEventListener("click", async (e) => {
       const b = e.target.closest("button");
       if (!b) return;
+      if (b.dataset.mode) { form.mode = b.dataset.mode; form.outlook = null; return drawForm(); }
       if (b.dataset.cans) { form.cans = +b.dataset.cans; return paint(); }
       if (b.dataset.reason) { form.reason = b.dataset.reason; return paint(); }
       if (b.id === "c-cancel") { form.changeOf = null; form.cans = 2000000; return drawForm(); }
@@ -290,6 +345,7 @@ function customerView(store, state) {
         return scrollTo({ top: 0, behavior: "smooth" });
       }
       if (b.id === "c-send") return send(b);
+      if (b.id === "c-share") return share(b);
       if (b.dataset.reply) return reply(b);
     });
   }
@@ -300,18 +356,36 @@ function customerView(store, state) {
     if (po && !delta) return toast("That's the same amount you have now.", true);
     btn.disabled = true;
     try {
-      const by = { name: ME.name };
-      const data = po
-        ? { kind: "change", parent: po.id, customer, trucks: delta, cans: delta * RULES.cansPerTruck, date: E.dateOf(po), reason: form.reason, signoffs: {}, by }
-        : { kind: "po", customer, trucks: trucks(), cans: trucks() * RULES.cansPerTruck, date: form.date, reason: form.reason, signoffs: {}, by };
+      const fresh = await store.list();
+      const d = draft();
+      d.data = { ...d.data, cans: d.data.trucks * RULES.cansPerTruck, reason: form.reason, by: { name: ME.name } };
+      const au = E.autoApprove([...fresh, d], d, NOW);
       const ev = po ? `Requested a change: ${delta > 0 ? "+" : "−"}${plural(Math.abs(delta), "truckload")}` : `Sent the PO: ${plural(trucks(), "truckload")} for ${fmtDate(form.date)}`;
-      await store.add({ type: "order", status: "waiting", data: E.withLog(data, entry(ev, ev)) });
-      toast(po ? "Change request sent to Ball." : "PO sent to Ball. Watch its progress on the right.");
+      const at = nowIso();
+      const auto = au.ok ? [{ at, by: "Ball HQ", tm: "system", ev: "Confirmed instantly: Priority customer, within the flex band, every check passed", cust: "Confirmed instantly" }] : [];
+      await store.add({ type: "order", status: au.ok ? "confirmed" : "waiting",
+        data: E.withLog({ ...d.data, ...(au.ok ? { answer: { kind: "auto", at } } : {}) }, entry(ev, ev), ...auto) });
+      toast(au.ok ? "Confirmed instantly. Ball's Logistics team books the trucks." : po ? "Change request sent to Ball's teams." : "PO sent to Ball's teams for review.");
       form.changeOf = null; form.cans = 2000000;
       drawForm();
       state.refresh();
     } catch (err) { toast("Couldn't send: " + err.message, true); }
     finally { btn.disabled = false; }
+  }
+
+  async function share(btn) {
+    btn.disabled = true;
+    try {
+      const weeks = Object.fromEntries(form.outlook.map((n, wk) => [E.addDays(E.weekKey(NOW), wk * 7), n]));
+      const changed = form.outlook.map((n, wk) => [wk, n - fcNow(wk)]).filter(([, d]) => d);
+      const ev = changed.length ? `Shared their outlook: ${changed.map(([wk, d]) => `${weekLabel(E.addDays(E.weekKey(NOW), wk * 7))} ${d > 0 ? "+" : "−"}${Math.abs(d)}`).join(", ")} (${form.reason})` : "Confirmed their outlook: no changes";
+      await store.add({ type: "forecast", status: "shared", data: { customer, weeks, note: form.reason, by: { name: ME.name }, log: [entry(ev, ev)] } });
+      toast(changed.length ? "Shared. Ball sees the change in trucks now." : "Shared. Ball knows nothing changed.");
+      form.outlook = null;
+      state.refresh();
+    } catch (err) {
+      toast(/check constraint/i.test(err.message) ? "Couldn't share: the database needs update-4.sql (ask your admin)." : "Couldn't share: " + err.message, true);
+    } finally { btn.disabled = false; }
   }
 
   async function reply(btn) {
@@ -344,7 +418,7 @@ function customerView(store, state) {
       line = `<p class="answer answer-offer">Ball can't do ${esc(fmtDate(it.data.date))}, but can deliver on <strong>${esc(fmtDate(it.data.answer.date))}</strong>. Does that work?</p>
         <div class="card-actions"><button type="button" class="util on" data-reply="yes" data-id="${esc(it.id)}">Accept ${esc(fmtShort(it.data.answer.date))}</button>
         <button type="button" class="util" data-reply="no" data-id="${esc(it.id)}">Decline</button></div>`;
-    } else if (st === "accepted") line = `<p class="answer answer-yes">${icon("check")}Accepted for ${esc(fmtDate(E.dateOf(it)))}. Ball's Logistics team is booking trucks.</p>`;
+    } else if (st === "accepted") line = `<p class="answer answer-yes">${icon("check")}${it.data.answer?.kind === "auto" ? "Confirmed instantly" : "Accepted"} for ${esc(fmtDate(E.dateOf(it)))}. Ball's Logistics team is booking trucks.</p>`;
     else line = `<p class="answer answer-yes">${icon("check")}Trucks booked for ${esc(fmtDate(E.dateOf(it)))}.</p>`;
     return bar + line;
   }
@@ -366,13 +440,15 @@ function customerView(store, state) {
         ${po.status !== "declined" ? `<div class="card-actions"><button type="button" class="util" data-change="${esc(po.id)}">Request a change</button></div>` : ""}
       </article>`;
     }).join("") : `<p class="empty">No POs yet. Place one on the left.</p>`;
-    const c = SIM_CUSTOMERS[customer];
-    const tier = E.priorityOf(c);
+    const r = E.reliability(items, customer, NOW);
+    const pr = r.tier === "Priority";
     $("#c-score").innerHTML = `<h2>Your reliability</h2>
-      <p class="score"><span class="big">${pct(c.inBand)}</span> of your orders this quarter stayed within your forecast (±10%).</p>
-      <p class="tier tier-${tier.toLowerCase()}">${tier === "Priority" ? "Priority customer: first claim on summer peak capacity." : "Standard customer: stay within your forecast 90% of the time to earn priority for summer peak capacity."}</p>
-      <p class="small">Reliability earns priority. Simulated score for the pilot.</p>`;
-    if (!form.changeOf) paint();
+      <p class="score"><span class="big">${pct(r.score)}</span> of your orders this quarter stayed within your outlook (±10%).</p>
+      <p class="tier tier-${r.tier.toLowerCase()}">${pr ? `${icon("check")}Priority customer: POs within your flex band are confirmed instantly, and you get first claim on summer peak capacity.`
+        : `Standard customer: your POs are reviewed by Ball's teams. Reach ${pct(RULES.priorityAt)} within your outlook to be confirmed instantly and get priority for summer peak capacity.`}</p>
+      <p class="small">Counts every PO and change you send. ${r.orders ? `This session: ${r.inBand} of ${r.orders} within your outlook.` : ""} The quarter's starting score is simulated for the pilot.</p>`;
+    if (form.mode === "outlook" && !form.changeOf && !form.outlook) drawForm();
+    else if (!form.changeOf) paint();
   }
 
   return { html, mount, live };
@@ -452,8 +528,10 @@ function board(store, state, team) {
     const s = it.data.signoffs?.[t];
     const open = E.answersOpen(it);
     const cls = s ? (s.ok ? "tbox-yes" : "tbox-no") : c.ok ? "tbox-ok" : "tbox-warn";
+    const auto = !s && it.data.answer?.kind === "auto";
     let act = "";
-    if (open && mine(t)) act = s
+    if (auto) act = `<p class="tb-signed">${icon("check")}Auto-approved: the check passed</p>${open && mine(t) ? `<button type="button" class="util slim" data-sign="${t}" data-ok="0" data-id="${esc(it.id)}">${icon("back")}Change to Reject</button>` : ""}`;
+    else if (open && mine(t)) act = s
       ? `<button type="button" class="util slim" data-sign="${t}" data-ok="${s.ok ? 0 : 1}" data-id="${esc(it.id)}">${icon("back")}Change to ${s.ok ? "Reject" : "Approve"}</button>`
       : `<div class="tb-btns"><button type="button" class="util${c.ok ? " on" : ""}" data-sign="${t}" data-ok="1" data-id="${esc(it.id)}">Approve</button>
           <button type="button" class="util${c.ok ? "" : " on"}" data-sign="${t}" data-ok="0" data-id="${esc(it.id)}">Reject</button></div>`;
@@ -478,7 +556,7 @@ function board(store, state, team) {
     if (st === "offered") return { tone: "", html: `<p><strong>Waiting on the customer</strong> to accept ${esc(fmtDate(it.data.answer.date))}.</p>` };
     if (st === "declined") return { tone: "", html: `<p><strong>Declined</strong>${it.data.customer_reply ? " by the customer" : " by Ball"}. Nothing ships.</p>` };
     if (st === "booked") return { tone: "ok", html: `<p>${icon("check")}<strong>Trucks booked:</strong> ${chips(a.contract, a.spot)}</p>` };
-    if (st === "accepted") return { tone: "ok", html: `<p>${icon("check")}<strong>Accepted${it.data.answer?.kind === "override" ? " as an exception" : ""}.</strong> Next, Logistics books the trucks.</p>
+    if (st === "accepted") return { tone: "ok", html: `<p>${icon("check")}<strong>${it.data.answer?.kind === "auto" ? "Confirmed instantly: Priority customer, within the flex band, every check passed" : `Accepted${it.data.answer?.kind === "override" ? " as an exception" : ""}`}.</strong> Next, Logistics books the trucks.</p>
        ${mine("logistics") ? `<a class="util on next-link" href="${link("logistics", { tab: "book" })}">Book trucks ${icon("arrow")}</a>` : `<p class="small">Waiting on Logistics · ${actAs("logistics")}</p>`}` };
     if (r.refused.length) {
       const better = E.betterDate(items, it, NOW);
@@ -524,6 +602,7 @@ function board(store, state, team) {
     return `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${isChange(it) ? `<span class="pill pill-change">Change request</span>` : ""}${stagePill(it)}
         <time>Updated ${esc(ago(log[0].at))}${ago(log[0].at) === "just now" ? "" : " ago"}</time></div>
       <h1 class="detail-h">${esc(custName(it.data.customer))}</h1>
+      ${(() => { const rel = E.reliability(items, it.data.customer, NOW); return `<p class="rel">${pct(rel.score)} of their orders within their outlook · <span class="tierchip tier-${rel.tier.toLowerCase()}">${rel.tier}</span></p>`; })()}
       <p class="po-what">${whatLine(items, it)} · ${esc(it.data.reason || "")}</p>
       ${related}
       <div class="signrow"><ul class="marks">${marks}</ul><span class="m-count">${r.approved} of 4 approved${r.refused.length ? `, ${r.refused.length} rejected` : ""}</span></div>
@@ -581,18 +660,22 @@ function board(store, state, team) {
 function salesPanel(items) {
   const weeks = Array.from({ length: RULES.weeks }, (_, wk) => E.addDays(E.weekKey(NOW), wk * 7));
   const rows = Object.entries(SIM_CUSTOMERS).map(([dest, c]) => {
+    const rel = E.reliability(items, dest, NOW);
     const cells = weeks.map((w, wk) => {
       const ordered = orders(items).filter((x) => E.isActive(x) && x.data.customer === dest && E.weekIndex(E.dateOf(x), NOW) === wk).reduce((s, x) => s + x.data.trucks, 0);
-      const fc = c.forecast[wk];
+      const fc = E.forecastOf(items, dest, wk, NOW);
+      const moved = fc - E.baselineFc(dest, wk);
       const band = Math.max(1, Math.round(fc * RULES.flexBand));
       const cls = !ordered ? "" : Math.abs(ordered - fc) <= band ? "z-green" : ordered > fc ? "z-red" : "z-yellow";
-      return `<td class="${cls}"><span class="cell-n">${ordered}</span><span class="cell-plan">of ${fc}</span></td>`;
+      return `<td class="${cls}"><span class="cell-n">${ordered}</span><span class="cell-plan">of ${fc}${moved ? ` <span class="delta ${moved > 0 ? "up" : "down"}">${moved > 0 ? "+" : "−"}${Math.abs(moved)}</span>` : ""}</span></td>`;
     }).join("");
-    return `<tr><th scope="row">${esc(c.name)}<span class="kind">${esc(dest)} · ${pct(c.inBand)} reliable · ${E.priorityOf(c)}</span></th>${cells}</tr>`;
+    return `<tr><th scope="row">${esc(c.name)}<span class="kind">${esc(dest)} · ${pct(rel.score)} reliable · ${rel.tier}</span></th>${cells}</tr>`;
   }).join("");
-  return `<h2>Customer orders vs. forecast, in truckloads</h2>
+  const shares = items.filter((x) => x.type === "forecast").reverse().slice(0, 6);
+  return `<h2>Customer orders vs. their outlook, in truckloads</h2>
     <div class="table-wrap"><table class="grid"><thead><tr><th>Customer</th>${weeks.map((w, i) => `<th>${i === 0 ? "This week" : weekLabel(w)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="small">Ordered (POs and changes, including ones still in review) of the customer's forecast. Green: within ±10%. Red: above it. Yellow: below it.</p>`;
+    <p class="small">Ordered (POs and changes, including ones in review) of the customer's latest outlook. +/− = the customer changed their outlook. Green: within ±10%. Red: above it. Yellow: below it.</p>
+    ${shares.length ? `<h3 class="sub-h">Latest outlook updates</h3><ul class="feed">${shares.map((f) => `<li><time>${esc(time(f.created_at))}</time> <strong>${esc(SIM_CUSTOMERS[f.data.customer].name)}</strong> · ${esc(logOf(f)[0]?.ev || "shared their outlook")}${f.data.by?.name ? ` · ${esc(f.data.by.name)}` : ""}</li>`).join("")}</ul>` : ""}`;
 }
 
 function inventoryPanel(items) {
@@ -610,18 +693,20 @@ function inventoryPanel(items) {
 
 function productionPanel(items) {
   const plan = E.planUse(items, NOW);
-  const used = SIM_LINE_TIME.map(() => 0);
+  const open = E.lineTime(items, NOW);
+  const used = open.map(() => 0);
   for (const it of orders(items)) {
     const p = plan.get(it.id);
     if (p && p.toMake != null && used[p.wk] != null) used[p.wk] += p.toMake - p.short;
   }
   const freezeTo = E.addDays(NOW, RULES.makeLeadDays + RULES.freezeDays - 1);
-  return `<h2>Findlay line time for new orders, in truckloads of cans</h2>
-    <div class="table-wrap"><table class="grid"><thead><tr><th></th>${SIM_LINE_TIME.map((_, wk) => `<th>${wk === 0 ? "This week" : weekLabel(E.addDays(E.weekKey(NOW), wk * 7))}</th>`).join("")}</tr></thead>
-    <tbody><tr><th scope="row">Open for new orders</th>${SIM_LINE_TIME.map((n) => `<td><span class="cell-n">${n}</span></td>`).join("")}</tr>
+  const th = open.map((_, wk) => `<th>${wk === 0 ? "This week" : weekLabel(E.addDays(E.weekKey(NOW), wk * 7))}</th>`).join("");
+  return `<h2>Findlay line time for these customers, in truckloads of cans</h2>
+    <div class="table-wrap"><table class="grid"><thead><tr><th></th>${th}</tr></thead>
+    <tbody><tr><th scope="row">Planned<span class="kind">from outlooks shared 2+ weeks ahead</span></th>${open.map((n, i) => `<td><span class="cell-n">${n}</span>${n > SIM_LINE_TIME[i] ? `<span class="cell-plan"><span class="delta up">+${n - SIM_LINE_TIME[i]}</span> early outlook</span>` : ""}</td>`).join("")}</tr>
       <tr><th scope="row">Used by POs</th>${used.map((n) => `<td><span class="cell-n">${n}</span></td>`).join("")}</tr>
-      <tr><th scope="row">Left</th>${SIM_LINE_TIME.map((n, i) => `<td class="${n - used[i] <= 0 ? "z-red" : n - used[i] <= 2 ? "z-yellow" : "z-green"}"><span class="cell-n">${n - used[i]}</span></td>`).join("")}</tr></tbody></table></div>
-    <p class="small">Frozen: anything delivering through ${esc(fmtDate(freezeTo))}. Runs lock ${RULES.freezeDays} days before they start, and cans are made about ${RULES.makeLeadDays} days before they ship.</p>`;
+      <tr><th scope="row">Left</th>${open.map((n, i) => `<td class="${n - used[i] <= 0 ? "z-red" : n - used[i] <= 2 ? "z-yellow" : "z-green"}"><span class="cell-n">${n - used[i]}</span></td>`).join("")}</tr></tbody></table></div>
+    <p class="small">When a customer shares an outlook increase 2+ weeks ahead, Production plans it into that week. Frozen: anything delivering through ${esc(fmtDate(freezeTo))} (runs lock ${RULES.freezeDays} days before they start; cans are made about ${RULES.makeLeadDays} days before they ship).</p>`;
 }
 const SIDE = { sales: salesPanel, inventory: inventoryPanel, production: productionPanel };
 
@@ -744,8 +829,8 @@ const ZONE = { green: "On plan", yellow: "Watch", red: "Act now" };
 
 function outlookView(store, state) {
   const html = `<section class="panel">
-      <h2>Findlay's next 6 weeks, in trucks</h2>
-      <p class="lede">POs come in as cans. We turn them into trucks (${num(RULES.cansPerTruck)} cans each) and compare every lane and week with the trucks its contract carrier takes, so Logistics calls the carrier weeks ahead, not on Thursday.</p>
+      <h2>Early warning: Findlay's next 6 weeks, in trucks</h2>
+      <p class="lede">Customer outlooks and POs come in as cans. We turn them into trucks (${num(RULES.cansPerTruck)} cans each) and compare every lane and week with the trucks its contract carrier takes, so Logistics calls the carrier weeks ahead, not on Thursday.</p>
       <p class="legend"><span class="z z-green">On plan</span> within ±10% <span class="z z-yellow">Watch</span> 10–25% <span class="z z-red">Act now</span> over 25% · <span class="b b-spot">n</span> trucks going spot</p>
       <div id="o-grid"><p class="empty">Loading…</p></div>
     </section>
@@ -772,22 +857,23 @@ function outlookView(store, state) {
     const L = locked("logistics");
     const cell = (w) => `<td class="cell z-${w.zone}" title="${ZONE[w.zone]}">
         <span class="cell-n">${w.needed}</span><span class="cell-plan">of ${w.cover}${w.extra ? ` (${w.extra > 0 ? "+" : ""}${w.extra})` : ""}</span>
-        <span class="cell-chg">${w.change > 0 ? "+" : ""}${Math.round(w.change * 100)}%</span>${w.spot ? `<span class="b b-spot">${w.spot}</span>` : ""}</td>`;
+        <span class="cell-chg">${w.change > 0 ? "+" : ""}${Math.round(w.change * 100)}%</span>${w.fcChange ? `<span class="cell-plan">outlook <span class="delta ${w.fcChange > 0 ? "up" : "down"}">${w.fcChange > 0 ? "+" : "−"}${Math.abs(w.fcChange)}</span></span>` : ""}${w.spot ? `<span class="b b-spot">${w.spot}</span>` : ""}</td>`;
     const group = (kind, title) => ol.filter((r) => r.lane.kind === kind).map((r, i) => `<tr>
         <th scope="row">${i === 0 ? `<span class="grp">${title}</span>` : ""}${esc(r.lane.destination)}<span class="kind">~${r.lane.perWeek} contract trucks a week</span></th>${r.weeks.map(cell).join("")}</tr>`).join("");
     $("#o-grid").innerHTML = `<div class="table-wrap"><table class="grid">
       <thead><tr><th>Lane from Findlay</th>${ol[0].weeks.map((w, i) => `<th>${i === 0 ? "This week" : weekLabel(w.week)}</th>`).join("")}</tr></thead>
       <tbody>${group("order", "To customers")}${group("transfer", "Transfers to warehouses")}</tbody></table></div>
-      <p class="small">Each cell: trucks needed (already booked + new POs and transfers) of the contract trucks that week, and the change vs. the usual.</p>`;
+      <p class="small">Each cell: trucks needed of the contract trucks that week, and the change vs. the usual. Customer lanes: Ball's other business + the customer's outlook (or their POs, if bigger). Transfer lanes: already booked + scheduled transfers.</p>`;
     const acts = [];
     for (const r of ol) for (const w of r.weeks) {
       if (!w.action) continue;
       const where = `<strong>${esc(laneName(r.lane))}</strong> · week of ${weekLabel(w.week)}`;
-      const what = `${w.needed} needed vs. ${r.lane.perWeek} usual (${w.change > 0 ? "+" : ""}${Math.round(w.change * 100)}%)`;
+      const cust = r.lane.kind === "order" ? SIM_CUSTOMERS[r.lane.destination].name : null;
+      const what = `${w.needed} needed vs. ${r.lane.perWeek} usual (${w.change > 0 ? "+" : ""}${Math.round(w.change * 100)}%)${w.fcChange ? ` · ${cust}'s outlook ${w.fcChange > 0 ? "+" : "−"}${Math.abs(w.fcChange)}` : ""}`;
       const cellKey = `${r.lane.key}@${w.week}`;
       acts.push({ z: w.zone, wk: w.wk, html: w.action.kind === "more"
-        ? `<li class="act z-${w.zone}"><span>${where}<br>${what} · <strong>${w.capSpot} going spot</strong></span>
-            <button type="button" class="util on" data-cell="${esc(cellKey)}" data-n="${w.capSpot}"${L}>Ask carrier for +${w.capSpot}</button></li>`
+        ? `<li class="act z-${w.zone}"><span>${where}<br>${what} · <strong>${w.action.trucks} short of contract trucks</strong> · ${E.daysBetween(NOW, E.addDays(w.week, 3))} days' notice</span>
+            <button type="button" class="util on" data-cell="${esc(cellKey)}" data-n="${w.action.trucks}"${L}>Ask carrier for +${w.action.trucks}</button></li>`
         : `<li class="act z-${w.zone}"><span>${where}<br>${what} · ${w.unused} contract trucks unused</span>
             <span class="act-btns"><button type="button" class="util" data-cell="${esc(cellKey)}" data-n="${-w.unused}"${L}>Warn carrier: −${w.unused}</button>
             ${r.lane.kind === "transfer" ? `<a class="small" href="${link("logistics", { tab: "transfers" })}">or ship a prebuild into it →</a>` : ""}</span></li>` });
@@ -883,6 +969,7 @@ function dashboardView(store, state) {
         <span class="live"><span class="pulse"></span>${store.live ? "Live" : "This laptop only"}</span></div>
       <div id="d-tiles" class="totals"><p class="empty">Loading…</p></div>
       <div id="d-teams"></div>
+      <div id="d-cust"></div>
       <div id="d-compare"></div>
       <div class="cols cols-plan">
         <section class="panel"><h2>Activity</h2><ul id="d-feed" class="feed"></ul></section>
@@ -909,11 +996,17 @@ function dashboardView(store, state) {
     const answered = os.filter((x) => x.data.answer?.at);
     const avgMin = answered.length ? answered.reduce((s, x) => s + (new Date(x.data.answer.at) - new Date(x.created_at)), 0) / answered.length / 60000 : null;
     const tile = (label, value, sub, cls = "") => `<div class="stat ${cls}"><p class="stat-label">${label}</p><p class="stat-value">${value}</p><p class="stat-sub">${sub}</p></div>`;
+    const k = E.kpis(items, NOW);
     $("#d-tiles").innerHTML =
-      tile("Spot share", now.trucks ? pct(now.spotShare) : "–", `${now.spot} of ${now.trucks} new truckloads · goal 10% or less`) +
-      tile("Spot cost", money(now.overspend), "paid above contract prices") +
-      tile("POs in review", inReview.length, `${os.filter((x) => E.stageOf(x) === "accepted").length} accepted, waiting to book`) +
-      tile("Time to answer customers", avgMin == null ? "–" : avgMin < 60 ? `${Math.max(1, Math.round(avgMin))} min` : `${(avgMin / 60).toFixed(1)} hr`, "target: under 4 hours");
+      tile("Spot share", now.trucks ? pct(now.spotShare) : "–", `${now.spot} of ${now.trucks} new truckloads · ${money(now.overspend)} over contract · goal ${pct(RULES.spotGoal)}`) +
+      tile("Days of warning", k.warningDays == null ? "–" : `${Math.round(k.warningDays)} days`, "from first hearing about the volume to delivery · today: 1–3 days") +
+      tile("Booked 3+ days ahead", k.bookedAhead == null ? "–" : pct(k.bookedAhead), `${k.bookedCount} booked so far · carriers need 3+ days`) +
+      tile("Time to answer customers", avgMin == null ? "–" : avgMin < 60 ? `${Math.max(1, Math.round(avgMin))} min` : `${(avgMin / 60).toFixed(1)} hr`, `target: under 4 hours · ${inReview.length} in review now`);
+    $("#d-cust").innerHTML = `<section class="panel"><h2>Customers: reliability earns priority</h2><div class="table-wrap"><table class="grid grid-plain">
+      <thead><tr><th>Customer</th><th>Within outlook</th><th>Tier</th><th>POs</th><th>Changes</th><th>Change-order rate</th><th>Outlook shared</th></tr></thead><tbody>
+      ${Object.entries(SIM_CUSTOMERS).map(([dest, c]) => { const r = E.reliability(items, dest, NOW); const pos = os.filter((x) => x.data.customer === dest && !isChange(x)).length; const last = E.latestOutlook(items, dest);
+        return `<tr><th scope="row">${esc(c.name)}<span class="kind">${esc(dest)}</span></th><td><strong>${pct(r.score)}</strong></td><td><span class="tierchip tier-${r.tier.toLowerCase()}">${r.tier}</span></td><td>${pos}</td><td>${r.changes}</td><td>${pos ? pct(r.changes / pos) : "–"}</td><td>${last ? esc(stamp(last.created_at)) : "not yet"}</td></tr>`; }).join("")}
+      </tbody></table></div><p class="small">Priority (${pct(RULES.priorityAt)}+ of orders within their outlook): POs within the flex band are confirmed instantly. Scores start from a simulated quarter and move with every PO and change.</p></section>`;
     $("#d-teams").innerHTML = `<section class="panel"><h2>Waiting on each team</h2><div class="teamrow">${TEAMS.map((t) => {
       const mineNow = os.filter((x) => needs(x, t));
       const oldest = mineNow.reduce((m, x) => (!m || x.created_at < m ? x.created_at : m), null);
@@ -931,7 +1024,8 @@ function dashboardView(store, state) {
     // Activity: every history entry from every PO, plus carrier answers and transfers.
     const feed = [];
     for (const it of items) {
-      if (it.type === "order") for (const e of logOf(it)) feed.push({ at: e.at, html: `<a href="${link("pos")}#${esc(it.id)}"><strong>${E.poNumber(items, it)}</strong>${isChange(it) ? " change" : ""}</a> · <strong>${whoLabel(it, e)}</strong> ${esc(e.ev)}` });
+      if (it.type === "forecast") feed.push({ at: it.created_at, html: `<strong>Outlook</strong> · <strong>${esc(it.data.by?.name || "Customer")} (${esc(SIM_CUSTOMERS[it.data.customer].name)})</strong> ${esc(logOf(it)[0]?.ev || "shared their outlook")}` });
+      else if (it.type === "order") for (const e of logOf(it)) feed.push({ at: e.at, html: `<a href="${link("pos")}#${esc(it.id)}"><strong>${E.poNumber(items, it)}</strong>${isChange(it) ? " change" : ""}</a> · <strong>${whoLabel(it, e)}</strong> ${esc(e.ev)}` });
       else if (it.type === "transfer") feed.push({ at: it.created_at, html: `<strong>Transfer</strong> ${plural(it.data.trucks, "truckload")} to ${esc(it.data.destination)}, ${esc(PATTERNS[it.data.pattern].label.toLowerCase())}${it.data.by?.name ? ` · ${esc(it.data.by.name)} (Logistics)` : ""}` });
       else if (!it.data.for) feed.push({ at: it.created_at, html: `<strong>Carrier</strong> ${esc(it.data.destination)}, week of ${weekLabel(it.data.week)}: ${esc(it.data.why || it.status)}` });
     }

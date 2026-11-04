@@ -3,7 +3,11 @@
 One customer change, followed from order to truck. Customers, Ball's four teams and its carriers work from the same numbers weeks before the trucks move. Built for the Ball case competition (Section 1, Team 2).
 
 ## Two portals
-**Customer HQ** (`?role=customer`): a customer signs in (name + company), places a PO (cans → truckloads, delivery date), requests changes, accepts or declines Ball's counteroffers, and sees each PO's progress and history. It never shows Ball's costs or spot.
+**Customer HQ** (`?role=customer`): a customer signs in (name + company), **shares their 6-week outlook** (what they expect to order each week, in cans), places a PO (cans → truckloads, delivery date), requests changes, accepts or declines Ball's counteroffers, and sees each PO's progress and history. Before sending, it shows whether the PO will be **confirmed instantly** or go to Ball's teams, and why. It never shows Ball's costs or spot.
+
+**Reliability earns priority.** Each customer's score = share of their orders within ±10% of their outlook (a simulated quarter of 30 orders, then every PO and change they send). 90%+ = Priority: a PO or change that is within the flex band and passes every team's check is **confirmed instantly**. Everything else goes to the four teams.
+
+**Early warning from customer outlooks.** Customer lanes: carrier plan = Ball's other business + the customer's outlook. When a customer raises their outlook, the 6-week view shows the trucks short weeks ahead, and Logistics asks the carrier then (7+ days' notice → it can add up to 25%). An increase shared 2+ weeks ahead also adds that week's line time (Production plans it in).
 
 **Ball HQ** (`?role=ball` opens your team's tab). Everyone signs in with a name and team. Every answer is stamped with who gave it.
 | Tab | Link | What it's for |
@@ -13,7 +17,7 @@ One customer change, followed from order to truck. Customers, Ball's four teams 
 | Inventory | `?role=inventory` | POs waiting on Inventory; labeled cans in stock, promised, left, stranded by cuts |
 | Production | `?role=production` | POs waiting on Production; line time open, used, left per week; the freeze date |
 | Logistics | `?role=logistics` (+ `&tab=book`, `outlook`, `transfers`) | Sign-offs, booking accepted POs (contract first, spot only with a reason), the 6-week early warning, transfers in waves |
-| Dashboard | `?role=dashboard` | Spot share and cost, what's waiting on each team, the old way vs. the system, activity from every PO's history |
+| Dashboard | `?role=dashboard` | The deck's KPIs (spot share vs. the 8% goal, days of warning, share booked 3+ days ahead, time to answer), what's waiting on each team, customer reliability and change-order rate, the old way vs. the system, activity |
 
 Any tab can be viewed by anyone; only the signed-in team can answer for that team ("Act as …" switches team in one click).
 
@@ -22,8 +26,8 @@ Any tab can be viewed by anyone; only the signed-in team can answer for that tea
 ## How the numbers work (all in `engine.js`)
 - **Carrier plan per lane** = the lane's 2026 average trucks a week (Jan–Jul loads ÷ 30.3 weeks). Ball's real carrier commitments aren't in the data, so this stands in for them.
 - **Already booked** (simulated) uses most of those trucks each week. New POs and transfers claim what's left, first come, first served.
-- **Customer forecast** (simulated) per week: Sales passes a PO when the customer's week stays within ±10% of it.
-- **One-day limit:** a carrier can add about 1/7 of a week's trucks on any one day. This is why spreading transfers helps.
+- **Customer outlook** per week (simulated starting forecast, replaced by whatever the customer shares): Sales passes a PO when the customer's week stays within ±10% of it.
+- **One-day limit (transfers):** a carrier can add about 1/7 of a week's trucks on any one day. This is why spreading Ball's own transfers helps. Customer deliveries are planned by the week.
 - **3-day rule:** anything not booked 3+ days ahead goes spot.
 - **Carrier asks** (simulated answer): with 7+ days' notice the carrier adds up to 25% of its weekly trucks; with less notice it says no.
 - **Money:** Making = $3,100 × trucks (Ball's average operating profit per truckload, FY2025 10-K). Extra trucking = spot premium per spot truck on customer orders, and the whole move on transfers. Profit left = Making − extra trucking.
@@ -33,7 +37,7 @@ Any tab can be viewed by anyone; only the signed-in team can answer for that tea
 **Simulated:** trucks already booked, the four customers and their forecasts, stock, line time, reliability scores and the carrier's answers.
 
 ## Setup
-1. Supabase → SQL Editor: run `supabase/update-3.sql` once. It adds the `items` table and the `reset_items` function and reuses the existing reset PIN.
+1. Supabase → SQL Editor: run `supabase/update-3.sql` once (the `items` table and `reset_items`), then `supabase/update-4.sql` once (lets it hold customer outlooks).
 2. `config.js` already holds the project URL and publishable key.
 3. GitHub Pages serves `main` / root. Bump `?v=` in `index.html` after changes.
 4. To clear test data: Dashboard → **Clear all data (admin)** → PIN.

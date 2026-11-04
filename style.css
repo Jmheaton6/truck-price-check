@@ -399,3 +399,28 @@ thead th { font: 600 12px var(--font); color: var(--ink-3); }
 .signin .seg { display: grid; grid-template-columns: repeat(5, 1fr); border-radius: var(--r-md); }
 .signin .seg button { padding: 0 6px; border-radius: var(--r-sm); font-size: 13px; }
 .banner-bad { background: var(--red-bg); color: var(--red); font-weight: 600; }
+
+/* v25: outlooks, instant confirmation, reliability */
+.c-mode { margin-bottom: var(--s5); }
+.c-mode button { flex: 1 1 0; }
+.ol-table { margin-bottom: var(--s5); }
+.ol-table th, .ol-table td { text-align: left; vertical-align: middle; }
+.ol-table td:nth-child(3), .ol-table th:nth-child(3) { text-align: right; }
+.ol-in { width: 110px !important; padding: 8px 10px !important; font-size: 16px !important; }
+.ol-n { font: 600 16px var(--font); }
+.delta { display: inline-block; padding: 0 7px; border-radius: var(--r-pill); font: 700 12px/1.6 var(--font); }
+.delta.up { background: var(--ball-tint); color: var(--ball-dk); }
+.delta.down { background: var(--sunken); color: var(--ink-2); }
+.preview { margin-bottom: var(--s5); padding: var(--s3) var(--s4); border-radius: var(--r-md); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.preview ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); }
+.preview li + li { margin-top: 4px; }
+.preview .small { margin-top: 8px; }
+.preview-ok { background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line); color: #1d4d34; }
+.pv-h { font: 700 16px var(--font); display: flex; align-items: center; }
+.preview-ok .pv-h { color: var(--green); }
+.rel { font: var(--t-caption); color: var(--ink-2); margin: -2px 0 var(--s2); display: flex; align-items: center; gap: 6px; }
+.tierchip { display: inline-block; padding: 0 9px; border-radius: var(--r-pill); font: 700 12px/1.7 var(--font); }
+.tierchip.tier-priority { background: var(--ball); color: #fff; }
+.tierchip.tier-standard { background: var(--sunken); color: var(--ink-2); }
+.tier .ic { vertical-align: -0.2em; }
+.sub-h { margin: var(--s5) 0 var(--s2); }
