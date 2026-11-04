@@ -65,7 +65,7 @@ Old links still work (`?role=review|schedule|dashboard|sales|production|outlook`
 1. Supabase: `supabase/update-3.sql` (the `items` table and `reset_items`). Nothing newer is needed.
 2. `config.js` holds the project URL and publishable key.
 3. Lanes: `python -I scripts/build_lanes.py "<workbook>.xlsx" lanes.js "MONTICELLO, IN"`.
-4. GitHub Pages serves `main`. Bump `?v=` in `index.html` and the imports at the top of `app.js` after every change.
+4. GitHub Pages serves `main`. Bump `?v=` in `index.html`, the imports at the top of `app.js` and the `lanes.js` import in `engine.js` after every change (browsers cache each file for 10 minutes).
 5. Reset the demo: **Reset demo** (top right, every screen) → PIN on the live site. Clears all data and opens the home page on Nov 5.
 
 ## Tests

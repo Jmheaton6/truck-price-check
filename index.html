@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Source+Serif+4:wght@400&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=47">
+  <link rel="stylesheet" href="style.css?v=48">
 </head>
 <body>
   <header class="top">
@@ -19,6 +19,11 @@
   <nav id="subnav" class="subnav" aria-label="Tabs" hidden></nav>
   <div id="mode-banner" class="banner" hidden></div>
   <main id="app"></main>
-  <script type="module" src="app.js?v=47"></script>
+  <script>
+    // If the app's code can't load (a stale cached file, no network), say what to do instead of a blank page.
+    setTimeout(() => { if (!document.getElementById("app").children.length) document.getElementById("app").innerHTML =
+      '<section class="panel narrow"><h1>Couldn\'t load the app</h1><p>Press Cmd+Shift+R (Ctrl+Shift+R on Windows) to reload.</p></section>'; }, 6000);
+  </script>
+  <script type="module" src="app.js?v=48"></script>
 </body>
 </html>
