@@ -99,3 +99,19 @@ Safety: build on a new branch. Today's version stays live until the new one pass
 - **Back to our regular look** (the earlier version), not the Ball black-and-blue restyle.
 - **No word without a purpose.** No lede paragraphs, no explainer text, no "simulated" notes on screens (those go in the README and the assumptions slide). Labels are 1–3 words. Numbers carry the meaning; color carries the status.
 - One main button per screen.
+
+## Overnight log (Claude)
+**Live now (v30, main d2b7983):** the five basic screens in our regular look. The Ball-look version is saved as git tag `v25-ball-look`.
+- **Customer HQ** (`?role=customer`): company picker in the header; New order (million cans → truckloads, deliver-on date) → Send; My orders with a status chip; Change on each order; a denied order shows a plain reason and a **Try [date]** button (the closest date where every check passes).
+- **Orders** (`?role=orders`): department picker in the header; "Waiting on me" / All; four department cards, each with one check line and **Accept / Deny** on your own card (the button matching the check is outlined). One deny stops the order; four accepts send it to the truck calendar. Answers can change until the trucks are booked. Logistics can **Ask carrier +N** right on the order when a truck would go spot (7+ days out).
+- **Trucks** (`?role=calendar`): one week per page, rows = customers and warehouses, a square per truck (solid = booked, outline = to book, red = spot, dashed = not accepted yet). Opens on the first week with something to book. Right side: **To book**, one row per order or transfer, with **Book** and **Book all**. Click a day for details and Ask carrier.
+- **Transfers** (`?role=transfers`): to, truckloads, start → four ways to ship (one day / 1 / 2 / 3 weeks) with squares, spot $, and Best → Put on calendar. Planned list with Remove (until booked).
+- **Executive** (`?role=exec`): Saved $ (old way − now), Spot spent $, spot-share bars (old way vs. now, goal 8%, 2026 16%), then Sales (time to answer), Inventory (truckloads stranded), Production (line time used), Logistics (spot %, booked 3+ days ahead). "Clear all data" (PIN) at the bottom.
+
+**Persona test bot:** `node tests/personas.mjs` (with `python3 -m http.server 8765` running). It plays Pat (customer), Sam (Sales), Ivy (Inventory), Paolo (Production), Lee (Logistics), Bo (Customer B) and Erin (Executive) through the whole day using only what's on screen, counts clicks, grades each screen (words ≤ 120, no line over 14 words, labeled inputs, no jargon), and writes `tests/persona-report.md` and screenshots to `tests/persona-shots/`. Last run: 19 tasks, all done, 0 issues.
+
+**Fixed because the bot or the screenshots caught it:** answered orders vanished (no way to reach Book trucks); "To book" hid orders not due for a week; a long transfer made 12 rows (now one row per order or transfer); Columbus appeared as both a customer and a warehouse (customer rows show the customer's name); denial reasons read like internal notes (customers now see "Over your forecast", "No line time that week", …); "Checking 0/4" was cryptic (Ball sees "2/4 accepted"); no recommended button; Logistics couldn't fix spot before answering (Ask carrier on the order); a planned transfer couldn't be removed.
+
+**Before you demo:** Executive → Clear all data (PIN). The live database still has 33 rows from the old versions.
+
+**Demo story (Thu Nov 5):** Customer A orders 2M cans for Nov 19 → all four accept → Logistics books 10 contract. Customer changes to 2.8M → Sales (over forecast) and Production (no line time) deny → customer taps Try Sun, Nov 22 → all accept. Logistics plans 12 to Mississauga "over 3 weeks" (12 contract vs 9 spot all-at-once) → Book all. Customer B orders 1.2M for Nov 25 → Logistics sees "1 of 6 would be spot" → Ask carrier +1 → yes → Accept. Executive: Saved about $9.3K, 0% spot now vs 44% the old way.
