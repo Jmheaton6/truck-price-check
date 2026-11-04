@@ -1,23 +1,25 @@
 // Ball Findlay pilot: all the logic, no screens. app.js draws it; tests/engine.test.mjs checks it.
 //
-// One idea runs through everything: each Findlay lane's carriers are staffed for about
-// C trucks a week (the lane's 2026 average). The forecast already uses most of that.
-// New orders and transfers claim what's left, first come first served. Whatever doesn't
-// fit goes on spot, unless a carrier agrees ahead of time to take extra trucks.
+// The one rule: each Findlay lane's contract carrier takes about N trucks a week (the lane's
+// 2026 average). Most of those are already booked by Ball's other business. A new PO or change
+// takes what's left, first come first served. Whatever doesn't fit goes spot, unless Logistics
+// gets the carrier to add trucks ahead of time.
 import { LANES } from "./lanes.js";
 
 export const RULES = {
   profitPerTruck: 3100,  // Ball's average operating profit per truckload (FY2025 10-K, see README)
-  greenAt: 2000,         // profit per truck colors (illustrative; finance would set these)
+  greenAt: 2000,         // profit-per-truck colors (illustrative; finance would set these)
   yellowAt: 1000,
-  noticeDays: 3,         // carriers need 3+ days; the customer change cutoff is the same 3 days
+  noticeDays: 3,         // carriers need 3+ days; customer changes inside 3 days need review
   freezeDays: 3,         // production runs lock 3 days before they start
   makeLeadDays: 2,       // cans are made about 2 days before they ship
-  cansPerTruck: 200000,  // ~one full truckload of 12 oz cans
-  flexBand: 0.10,        // customer changes within ±10% of the week's forecast are "inside the band"
-  watchAt: 0.10,         // outlook: over ±10% vs. carrier plan = Watch, over ±25% = Act now
+  cansPerTruck: 200000,  // about one full truckload of 12 oz cans
+  flexBand: 0.10,        // a customer's week can be within ±10% of its forecast
+  carrierFlexShare: 0.25,      // simulated: with a week's notice a carrier can add up to 25% of its weekly trucks
+  carrierFlexNoticeDays: 7,
+  watchAt: 0.10,         // outlook colors: over ±10% vs. the carrier plan = Watch, over ±25% = Act now
   actAt: 0.25,
-  weeks: 6,              // outlook horizon
+  weeks: 6,              // horizon
   weeksOf2026: 30.3,     // Jan 1 – Jul 31, 2026
 };
 
@@ -35,31 +37,32 @@ export const PILOT_LANES = PILOT.map(([kind, destination]) => {
   return {
     ...l,
     key: laneKey(kind, destination),
-    perWeek,                         // carriers' weekly plan: 2026 average trucks a week
-    perDay: Math.ceil(perWeek / 7),  // what a carrier can add on any one day
+    perWeek,                         // contract trucks a week: the lane's 2026 average
+    perDay: Math.ceil(perWeek / 7),  // most a carrier can add on any one day
     spotCost: l.contract_cost + l.spot_premium,
   };
 });
 export const laneOf = (kind, destination) => PILOT_LANES.find((l) => l.kind === kind && l.destination === destination);
 
-// ---------- Simulated operating data (not in the workbook; clearly labeled in the app) ----------
-// Short-term forecast for the next 6 weeks, as a share of each lane's usual weekly trucks.
-export const SIM_FORECAST = {
-  "order|Cincinnati, OH":     [0.95, 0.95, 0.9, 0.95, 0.8, 0.95], // a lighter week: room for a "better date"
+// ---------- Simulated operating data (not in the workbook; labeled in the app) ----------
+// Trucks already booked on each lane by Ball's other business, as a share of the weekly contract trucks.
+export const SIM_BOOKED = {
+  "order|Cincinnati, OH":     [0.95, 0.95, 0.9, 0.95, 0.8, 0.95], // a lighter week: room for a counteroffer date
   "order|Columbus, OH":       [0.95, 0.95, 0.9, 0.95, 0.95, 0.9],
   "order|Mertztown, PA":      [0.9, 0.9, 1.0, 0.9, 0.9, 1.0],
   "order|Downey, CA":         [0.9, 0.9, 0.9, 1.0, 0.9, 0.9],
-  "transfer|Mississauga, ON": [0.95, 0.6, 0.75, 0.6, 0.95, 0.95],  // the designed dip: room for a prebuild
+  "transfer|Mississauga, ON": [0.95, 0.6, 0.75, 0.6, 0.95, 0.95],  // a dip: room for a prebuild
   "transfer|Adairsville, GA": [0.95, 0.95, 1.0, 0.95, 0.95, 0.95],
   "transfer|Dorval, QC":      [0.95, 1.0, 0.95, 0.95, 1.0, 0.95],
   "transfer|Columbus, OH":    [0.95, 0.95, 0.9, 0.95, 1.0, 0.95],
 };
-// One customer filling plant per sales-order lane. Stock = truckloads of their labeled cans at Findlay.
+// One customer filling plant per sales-order lane.
+// forecast = truckloads a week the customer told Ball to expect; stock = truckloads of their labeled cans at Findlay.
 export const SIM_CUSTOMERS = {
-  "Cincinnati, OH": { name: "Customer A", stock: 2, inBand: 0.94 },
-  "Columbus, OH":   { name: "Customer B", stock: 0, inBand: 0.81 },
-  "Mertztown, PA":  { name: "Customer C", stock: 1, inBand: 0.97 },
-  "Downey, CA":     { name: "Customer D", stock: 0, inBand: 0.72 },
+  "Cincinnati, OH": { name: "Customer A", stock: 2, inBand: 0.94, forecast: [8, 8, 10, 8, 8, 8] },
+  "Columbus, OH":   { name: "Customer B", stock: 0, inBand: 0.81, forecast: [5, 5, 6, 5, 5, 5] },
+  "Mertztown, PA":  { name: "Customer C", stock: 1, inBand: 0.97, forecast: [1, 1, 2, 1, 1, 2] },
+  "Downey, CA":     { name: "Customer D", stock: 0, inBand: 0.72, forecast: [1, 1, 1, 2, 1, 1] },
 };
 export const priorityOf = (c) => (c.inBand >= 0.9 ? "Priority" : "Standard");
 // Open line time at Findlay for new orders, in truckloads of cans, weeks 0–5.
@@ -75,27 +78,28 @@ export const weekKey = (iso) => addDays(iso, -atNoon(iso).getDay());
 export const weekIndex = (iso, now) => daysBetween(weekKey(now), weekKey(iso)) / 7;
 const dayOfTs = (ts) => isoDate(new Date(ts));
 
-export const forecastTrucks = (lane, wk) => {
-  const m = SIM_FORECAST[lane.key]?.[wk];
-  return Math.round(lane.perWeek * (m ?? 1));
-};
+export const bookedTrucks = (lane, wk) => Math.round(lane.perWeek * (SIM_BOOKED[lane.key]?.[wk] ?? 1));
 export const trucksFromCans = (cans) => Math.max(1, Math.ceil(cans / RULES.cansPerTruck));
 
 // ---------- Items (what the app saves) ----------
-// order:    a customer change. data { customer, trucks (+add / −cut), date, reason, cans, answer?, booked_at? }
-//           status waiting → offered → confirmed | declined   (answer "confirm" goes straight to confirmed)
+// order:    a customer PO (data.kind "po", trucks > 0) or a change to one (data.kind "change", parent, trucks ±).
+//           data { customer, kind, parent?, trucks, cans, date, reason, signoffs{team:{ok,at}}, answer?, scheduled_at?, spot_reason? }
+//           status: waiting (in review) → confirmed (accepted) or offered (counteroffer out) → confirmed | declined
+//           Scheduled = data.scheduled_at is set (Logistics booked the trucks).
 // transfer: a prebuild move Ball schedules itself. data { destination, trucks, date, pattern, booked_at }; status booked
-// ask:      Logistics asks the lane's carrier for +N (or warns −N). data { kind, destination, week, trucks, accepted? }
-//           status asked → yes | part | no   (a −N warning becomes "noted")
+// ask:      Logistics asked the lane's carrier for ±N. data { kind, destination, week, date, trucks, accepted };
+//           status yes | part | no (more trucks) or noted (fewer)
+export const TEAMS = ["sales", "inventory", "production", "logistics"];
 export const isActive = (it) => !(it.type === "order" && it.status === "declined");
-export const isBooked = (it) => (it.type === "order" ? it.status === "confirmed" : it.type === "transfer");
+export const isBooked = (it) => (it.type === "order" ? !!it.data.scheduled_at : it.type === "transfer");
+const bookedAt = (it) => (it.type === "order" ? it.data.scheduled_at : it.data.booked_at || it.created_at);
 export const itemLane = (it) =>
   it.type === "order" ? laneOf("order", it.data.customer)
   : it.type === "transfer" ? laneOf("transfer", it.data.destination)
   : laneOf(it.data.kind, it.data.destination);
-// An offered (or accepted) new date replaces the date the customer asked for.
+// A counteroffered (or accepted) new date replaces the date the customer asked for.
 export const dateOf = (it) =>
-  it.type === "order" && it.data.answer?.kind === "new_date" && it.status !== "declined" && it.status !== "waiting"
+  it.type === "order" && it.data.answer?.kind === "new_date" && (it.status === "offered" || it.status === "confirmed")
     ? it.data.answer.date : it.data.date;
 export const patternOf = (it) => (it.type === "transfer" ? it.data.pattern || "day" : "day");
 export const PATTERNS = {
@@ -104,6 +108,14 @@ export const PATTERNS = {
   w2: { label: "Waves over 2 weeks", days: 14 },
   w3: { label: "Waves over 3 weeks", days: 21 },
 };
+
+// PO numbers: PO-1001, PO-1002… in the order POs arrived. A change shows its PO's number.
+export function poNumber(items, it) {
+  const pos = items.filter((x) => x.type === "order" && x.data.kind !== "change").sort(byCreated);
+  const root = it.data.kind === "change" ? items.find((x) => String(x.id) === String(it.data.parent)) : it;
+  const i = pos.findIndex((x) => x === root || String(x.id) === String(root?.id));
+  return i < 0 ? "PO-?" : `PO-${1001 + i}`;
+}
 
 // n trucks spread as evenly as possible over k days starting at `date`.
 export function spreadDays(date, n, pattern = "day") {
@@ -115,22 +127,38 @@ export function spreadDays(date, n, pattern = "day") {
   }
   return out;
 }
-const byCreated = (a, b) =>
-  a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : String(a.id) < String(b.id) ? -1 : 1;
+export const byCreated = (a, b) =>
+  a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1
+  : String(a.id) === String(b.id) ? 0 : String(a.id) < String(b.id) ? -1 : 1;
 
-// Extra contract trucks carriers agreed to (+) or released after a warning (−), per lane-week.
+// Extra contract trucks a carrier agreed to (+) or gave back after a warning (−), per lane-week.
 export function carrierExtras(items, now) {
   const out = new Map();
   for (const it of items) {
     if (it.type !== "ask") continue;
-    const lane = itemLane(it);
-    const wk = weekIndex(it.data.week, now);
+    const k = `${itemLane(it).key}|${weekIndex(it.data.week, now)}`;
     let n = 0;
     if (it.data.trucks > 0 && (it.status === "yes" || it.status === "part")) n = it.data.accepted ?? it.data.trucks;
     if (it.data.trucks < 0 && it.status === "noted") n = it.data.trucks;
-    if (n) out.set(`${lane.key}|${wk}`, (out.get(`${lane.key}|${wk}`) || 0) + n);
+    if (n) out.set(k, (out.get(k) || 0) + n);
   }
   return out;
+}
+
+// The simulated carrier's answer: with 7+ days' notice it can add up to 25% of its weekly trucks
+// (minus what it already added that week). With less notice it can't find drivers.
+export function carrierAnswer(items, lane, date, trucks, now) {
+  if (trucks < 0) return { status: "noted", accepted: trucks, why: "Thanks for the heads-up. We'll move those drivers." };
+  const days = daysBetween(now, date);
+  if (days < RULES.carrierFlexNoticeDays)
+    return { status: "no", accepted: 0, why: `Only ${days} days' notice. We can't add drivers that fast.` };
+  const wk = weekIndex(date, now);
+  const already = Math.max(0, carrierExtras(items, now).get(`${lane.key}|${wk}`) || 0);
+  const cap = Math.ceil(lane.perWeek * RULES.carrierFlexShare);
+  const accepted = Math.max(0, Math.min(trucks, cap - already));
+  if (accepted === trucks) return { status: "yes", accepted, why: `Yes: we can add ${trucks} trucks that week.` };
+  if (accepted > 0) return { status: "part", accepted, why: `We can add ${accepted}, not ${trucks}. That's our limit for that week.` };
+  return { status: "no", accepted: 0, why: "We're already adding all the trucks we can that week." };
 }
 
 // What a contract/spot split costs and earns. Customer order: the $3,100 already includes a contract
@@ -149,7 +177,7 @@ export function splitMoney(lane, contract, spot) {
 }
 export const colorFor = (perTruck) => (perTruck >= RULES.greenAt ? "green" : perTruck >= RULES.yellowAt ? "yellow" : "red");
 
-// ---------- The allocation: who gets contract trucks ----------
+// ---------- Who gets contract trucks ----------
 // opts.oldWay: the same orders without the system (no carrier asks, transfers all on one day).
 // Returns Map(item id → result).
 export function allocate(items, now, opts = {}) {
@@ -157,12 +185,10 @@ export function allocate(items, now, opts = {}) {
   const extras = opts.oldWay ? new Map() : carrierExtras(items, now);
   const usedWeek = new Map();
   const usedDay = new Map();
-  // Cuts free their trucks for everyone that week.
-  const freed = new Map();
+  const freed = new Map(); // cuts free their trucks for everyone that week
   for (const it of list) {
     if (it.data.trucks >= 0) continue;
-    const lane = itemLane(it);
-    const k = `${lane.key}|${weekIndex(dateOf(it), now)}`;
+    const k = `${itemLane(it).key}|${weekIndex(dateOf(it), now)}`;
     freed.set(k, (freed.get(k) || 0) - it.data.trucks);
   }
   const out = new Map();
@@ -176,7 +202,7 @@ export function allocate(items, now, opts = {}) {
       continue;
     }
     const pattern = opts.oldWay ? "day" : patternOf(it);
-    const bookedDay = isBooked(it) ? dayOfTs(it.data.booked_at || it.created_at) : null;
+    const bookedDay = isBooked(it) ? dayOfTs(bookedAt(it)) : null;
     const reasons = new Set();
     const days = spreadDays(date, trucks, pattern).map(({ day, n }) => {
       const wk = weekIndex(day, now);
@@ -184,7 +210,9 @@ export function allocate(items, now, opts = {}) {
       const dKey = `${lane.key}|${day}`;
       const extra = extras.get(wKey) || 0;
       const cover = lane.perWeek + extra;
-      const weekRoom = Math.max(0, cover - forecastTrucks(lane, wk) + (freed.get(wKey) || 0) - (usedWeek.get(wKey) || 0));
+      const booked = bookedTrucks(lane, wk);
+      const earlier = usedWeek.get(wKey) || 0;
+      const weekRoom = Math.max(0, cover - booked + (freed.get(wKey) || 0) - earlier);
       const dayRoom = Math.max(0, lane.perDay + Math.max(0, extra) - (usedDay.get(dKey) || 0));
       let contract, why = null;
       if (bookedDay && daysBetween(bookedDay, day) < RULES.noticeDays) { contract = 0; why = "notice"; }
@@ -194,23 +222,25 @@ export function allocate(items, now, opts = {}) {
         if (contract < n) why = weekRoom <= dayRoom ? "week" : "day";
       }
       if (why) reasons.add(why);
-      usedWeek.set(wKey, (usedWeek.get(wKey) || 0) + contract);
+      usedWeek.set(wKey, earlier + contract);
       usedDay.set(dKey, (usedDay.get(dKey) || 0) + contract);
-      // capSpot: spot because carriers had no room (an early ask can fix it), not because it was too late
-      return { day, wk, n, contract, spot: n - contract, capSpot: why === "week" || why === "day" ? n - contract : 0, weekRoom, dayRoom };
+      // capSpot: spot because the carrier had no room (asking early can fix it), not because it was too late
+      return { day, wk, n, contract, spot: n - contract, capSpot: why === "week" || why === "day" ? n - contract : 0,
+        cover, extra, booked, earlier, weekRoom, dayRoom };
     });
     const contract = days.reduce((s, d) => s + d.contract, 0);
     const spot = trucks - contract;
-    out.set(it.id, { lane, date, trucks, pattern, contract, spot, days, reasons: [...reasons], ...splitMoney(lane, contract, spot) });
+    const capSpot = days.reduce((s, d) => s + d.capSpot, 0);
+    out.set(it.id, { lane, date, trucks, pattern, contract, spot, capSpot, days, reasons: [...reasons], ...splitMoney(lane, contract, spot) });
   }
   return out;
 }
 
 export const REASON_TEXT = {
-  week: "the lane's contract trucks that week are already used by the forecast and earlier orders",
-  day: "too many trucks on one day: carriers can add only about 1/7 of a week's trucks on any day",
-  late: `not booked in time: under ${RULES.noticeDays} days to go, so contract carriers can't take it`,
-  notice: `booked with under ${RULES.noticeDays} days' notice`,
+  week: "the contract trucks left that week run out",
+  day: "a carrier can only add about 1/7 of its weekly trucks on one day",
+  late: `it's under ${RULES.noticeDays} days away and not booked yet`,
+  notice: `it was booked with under ${RULES.noticeDays} days' notice`,
 };
 
 // ---------- Production and inventory (simulated stock and line time, first come first served) ----------
@@ -231,65 +261,98 @@ export function planUse(items, now) {
     const open = Math.max(0, lineLeft[wk] ?? 0);
     const made = Math.min(toMake, open);
     if (lineLeft[wk] != null) lineLeft[wk] -= made;
-    out.set(it.id, { wk, daysOut, frozen, fromStock, toMake, open, short: toMake - made });
+    out.set(it.id, { wk, daysOut, frozen, fromStock, toMake, open, short: toMake - made, lineTotal: SIM_LINE_TIME[wk] ?? 0 });
   }
   return out;
 }
 
-// ---------- The four team checks for one customer order ----------
-// Each check: { ok: true | false, title, detail }.
+// ---------- The four team checks ----------
+// Each check: { ok, question, facts: [lines], verdict }. The app pre-checks; the team confirms or overrides.
+export const QUESTIONS = {
+  sales: "Is it within what the customer told us to expect?",
+  inventory: "Do we have their labeled cans?",
+  production: "Can Findlay make it in time?",
+  logistics: "Can we ship it on contract trucks?",
+};
+
 export function checks(items, it, now) {
   const lane = itemLane(it);
   const date = dateOf(it);
   const wk = weekIndex(date, now);
-  const fc = forecastTrucks(lane, wk);
+  const cust = SIM_CUSTOMERS[it.data.customer];
   const a = allocate(items, now).get(it.id);
   const p = planUse(items, now).get(it.id);
   const cut = it.data.trucks < 0;
   const n = Math.abs(it.data.trucks);
+  const s = (k) => (k === 1 ? "" : "s");
 
-  // Sales: inside the ±10% band (all of this customer's changes that week count together) and outside the cutoff.
-  const weekChange = items
-    .filter((x) => x.type === "order" && isActive(x) && x.data.customer === it.data.customer && x.created_at <= it.created_at
-      && weekIndex(dateOf(x), now) === wk)
-    .reduce((s, x) => s + x.data.trucks, 0);
+  // Sales: the customer's total for that week (POs and changes so far) vs. its forecast, ±10%.
+  const fc = cust.forecast[wk] ?? cust.forecast[cust.forecast.length - 1];
+  const weekTotal = items
+    .filter((x) => x.type === "order" && isActive(x) && x.data.customer === it.data.customer
+      && byCreated(x, it) <= 0 && weekIndex(dateOf(x), now) === wk)
+    .reduce((sum, x) => sum + x.data.trucks, 0);
   const band = Math.max(1, Math.round(fc * RULES.flexBand));
-  const inBand = Math.abs(weekChange) <= band;
+  const inBand = Math.abs(weekTotal - fc) <= band;
   const daysOut = daysBetween(now, date);
   const inCutoff = daysOut < RULES.noticeDays;
   const sales = {
     ok: inBand && !inCutoff,
-    title: inBand ? "Inside the flex band" : "Outside the flex band",
-    detail: `${weekChange > 0 ? "+" : ""}${weekChange} trucks vs. their forecast of ${fc} that week. Band: ±${band} (10%).`
-      + (inCutoff ? ` And it's inside the ${RULES.noticeDays}-day cutoff.` : ""),
+    facts: [
+      `Their forecast for that week: ${fc} truckload${s(fc)}.`,
+      `With this ${it.data.kind === "change" ? "change" : "PO"}: ${weekTotal}. Allowed: ${fc - band} to ${fc + band} (±10%).`,
+      `${daysOut} days before delivery${inCutoff ? `: inside the ${RULES.noticeDays}-day cutoff.` : "."}`,
+    ],
+    verdict: inCutoff ? "Too close to delivery" : inBand ? "Within the forecast" : weekTotal > fc ? "Above the forecast band" : "Below the forecast band",
   };
 
   let inventory, production;
   if (cut) {
     inventory = p.frozen
-      ? { ok: false, title: "Cans already made", detail: `${n} truckloads of their labeled cans are already made. They wait in the warehouse for this customer's next order.` }
-      : { ok: true, title: "Nothing stranded", detail: "The cut comes before the run starts, so no labeled cans are left over." };
-    production = { ok: true, title: "Run gets smaller", detail: p.frozen ? "Run already locked; no change." : `${n} fewer truckloads to make. That line time opens for other orders.` };
+      ? { ok: false, facts: [`Their cans are already made for that date.`, `${n} truckload${s(n)} of labeled cans would be left over. Only this customer can use them.`], verdict: "Cans would be stranded" }
+      : { ok: true, facts: ["The cut comes before the cans are made.", "Nothing is left over."], verdict: "Nothing stranded" };
+    production = { ok: true, facts: [p.frozen ? "The run is already locked. No change." : `${n} fewer truckload${s(n)} to make.`, "That line time opens up for other orders."], verdict: "Run gets smaller" };
   } else {
-    inventory = p.fromStock
-      ? { ok: true, title: `${p.fromStock} of ${n} from stock`, detail: `Findlay has their labeled cans for ${p.fromStock} truckload${p.fromStock === 1 ? "" : "s"}.` + (p.toMake ? ` ${p.toMake} more must be made.` : " No new production needed.") }
-      : { ok: true, title: "None in stock", detail: `All ${n} truckloads must be made.` };
-    if (!p.toMake) production = { ok: true, title: "No production change", detail: "It ships from cans already made." };
-    else if (p.frozen) production = { ok: false, title: "Inside the production freeze", detail: `Runs lock ${RULES.freezeDays} days before they start. Making ${p.toMake} truckloads by then means moving another run.` };
-    else if (p.short) production = { ok: false, title: "Not enough line time", detail: `Only ${p.open} of ${p.toMake} truckloads of open line time that week. The rest needs overtime or a moved run.` };
-    else production = { ok: true, title: "Fits open line time", detail: `${p.toMake} truckload${p.toMake === 1 ? "" : "s"} fit in Findlay's open line time that week.` };
+    inventory = { ok: true,
+      facts: [`Their labeled cans in stock at Findlay cover ${p.fromStock} of ${n} truckload${s(n)}.`,
+        p.toMake ? `${p.toMake} more must be made (Production).` : "No new cans need to be made."],
+      verdict: p.fromStock ? `${p.fromStock} from stock` : "Nothing in stock: all made new" };
+    if (!p.toMake) production = { ok: true, facts: ["It ships from cans already made.", "No change to the schedule."], verdict: "No production change" };
+    else if (p.frozen) production = { ok: false, facts: [`Needs ${p.toMake} truckload${s(p.toMake)} made.`, `Runs lock ${RULES.freezeDays} days before they start. This is inside the freeze.`], verdict: "Inside the production freeze" };
+    else production = { ok: !p.short,
+      facts: [`Needs ${p.toMake} truckload${s(p.toMake)} made that week.`, `Open line time that week: ${p.open} of ${p.lineTotal} (the rest is taken by earlier orders).`],
+      verdict: p.short ? `Short ${p.short} truckload${s(p.short)} of line time` : "Fits in open line time" };
   }
 
-  const logistics = cut
-    ? { ok: true, title: `Frees ${n} contract trucks`, detail: "Tell the carrier now so it can move its drivers. That goodwill gets our loads accepted later." }
-    : a.spot
-      ? { ok: false, title: `${a.spot} of ${n} trucks go spot`, detail: `${a.contract} fit on contract. Spot ones go because ${a.reasons.map((r) => REASON_TEXT[r]).join("; ")}.` }
-      : { ok: true, title: "All on contract", detail: `All ${n} fit in the carrier's plan for that week.` };
+  let logistics;
+  if (cut) logistics = { ok: true, facts: [`Frees ${n} contract truck${s(n)} that week.`, "Warn the carrier so it can move those drivers."], verdict: "Frees contract trucks" };
+  else {
+    const d = a.days[0];
+    const late = a.reasons.includes("late");
+    logistics = {
+      ok: a.spot === 0,
+      facts: late ? [`It's under ${RULES.noticeDays} days away: contract carriers can't take it.`, `All ${n} would go spot (${moneyStr(a.overspend)} more).`] : [
+        `Contract trucks that week: ${d.cover}${d.extra > 0 ? ` (incl. ${d.extra} extra the carrier agreed to)` : ""}.`,
+        `Already booked: ${d.booked}${d.earlier ? ` + ${d.earlier} for earlier POs` : ""}. Left: ${d.weekRoom}.`,
+        a.spot ? `This needs ${n}: ${a.contract} on contract, ${a.spot} would go spot (${moneyStr(a.overspend)} more).` : `This needs ${n}: all fit on contract.`,
+      ],
+      verdict: a.spot ? `${a.spot} of ${n} would go spot` : "All on contract",
+    };
+  }
+  return { sales, inventory, production, logistics, alloc: a, plan: p, inBand, fc, band, weekTotal };
+}
+const moneyStr = (n) => "$" + Math.round(n).toLocaleString("en-US");
 
-  return { sales, inventory, production, logistics, alloc: a, plan: p, inBand, fc, band, weekChange };
+// Sign-off progress for one PO or change.
+export function review(items, it, now) {
+  const c = checks(items, it, now);
+  const signed = it.data.signoffs || {};
+  const approved = TEAMS.filter((t) => signed[t]?.ok === true).length;
+  const refused = TEAMS.filter((t) => signed[t]?.ok === false);
+  return { checks: c, signed, approved, refused, allApproved: approved === TEAMS.length };
 }
 
-// The best other date (within 2 weeks either side, 3+ days out, inside the horizon) that makes more profit
+// The best other date (within 2 weeks either side, 5+ days out, inside the horizon) that makes more profit
 // and that Production can make. Ties go to the closest date.
 export function betterDate(items, it, now) {
   const base = allocate(items, now).get(it.id);
@@ -312,57 +375,37 @@ export function betterDate(items, it, now) {
   return best;
 }
 
-// What Ball should answer. Suggestion only; a person clicks.
-export function suggestAnswer(items, it, now) {
-  const c = checks(items, it, now);
-  if (it.data.trucks < 0) return { kind: "confirm", why: "A cut frees trucks. Confirm it and warn the carrier." };
-  const allOk = c.sales.ok && c.inventory.ok && c.production.ok && c.logistics.ok;
-  if (allOk) return { kind: "confirm", why: "All four checks pass." };
-  const better = betterDate(items, it, now);
-  if (better) return { kind: "new_date", date: better.date, gain: better.gain, why: "Another date clears more checks and saves money." };
-  if (!c.logistics.ok && !c.inBand) return { kind: "confirm_cost", cost: c.alloc.overspend, why: "Outside the band, so the customer shares the spot cost." };
-  if (c.logistics.ok && c.production.ok) return { kind: "confirm", why: "Outside the band, but the trucks and line time are secured." };
-  return { kind: "confirm", why: "Inside the band, so Ball absorbs the cost to keep the customer." };
-}
-
-// ---------- The 6-week outlook (our version of the early-warning system) ----------
+// ---------- The 6-week outlook (early warning) ----------
 export function outlook(items, now) {
   const alloc = allocate(items, now);
   const extras = carrierExtras(items, now);
-  const asks = items.filter((x) => x.type === "ask");
   return PILOT_LANES.map((lane) => ({
     lane,
     weeks: Array.from({ length: RULES.weeks }, (_, wk) => {
       const week = addDays(weekKey(now), wk * 7);
-      const forecast = forecastTrucks(lane, wk);
-      let adds = 0, cuts = 0, contract = 0, spot = 0, capSpot = 0, waiting = 0;
+      const booked = bookedTrucks(lane, wk);
+      let adds = 0, cuts = 0, contract = 0, spot = 0, capSpot = 0;
       for (const it of items) {
         const a = alloc.get(it.id);
         if (!a || itemLane(it) !== lane) continue;
         if (a.trucks < 0) { if (weekIndex(a.date, now) === wk) cuts += a.cut; continue; }
-        for (const d of a.days) {
-          if (d.wk !== wk) continue;
-          adds += d.n; contract += d.contract; spot += d.spot; capSpot += d.capSpot;
-          if (!isBooked(it)) waiting += d.n;
-        }
+        for (const d of a.days) if (d.wk === wk) { adds += d.n; contract += d.contract; spot += d.spot; capSpot += d.capSpot; }
       }
-      const needed = forecast + adds - cuts;
+      const needed = booked + adds - cuts;
       const extra = extras.get(`${lane.key}|${wk}`) || 0;
       const cover = lane.perWeek + extra;
       const change = (needed - lane.perWeek) / lane.perWeek;
       const zone = Math.abs(change) <= RULES.watchAt ? "green" : Math.abs(change) <= RULES.actAt ? "yellow" : "red";
-      const cellAsks = asks.filter((x) => itemLane(x) === lane && weekIndex(x.data.week, now) === wk);
-      const openAsk = cellAsks.find((x) => x.status === "asked");
       const unused = Math.max(0, cover - needed);
       let action = null;
-      if (capSpot > 0 && !openAsk) action = { kind: "more", trucks: capSpot };
-      else if (zone !== "green" && needed < lane.perWeek && !openAsk && unused > 0) action = { kind: "fewer", trucks: unused };
-      return { wk, week, forecast, adds, cuts, needed, extra, cover, contract, spot, capSpot, waiting, change, zone, unused, asks: cellAsks, openAsk, action };
+      if (capSpot > 0) action = { kind: "more", trucks: capSpot };
+      else if (zone !== "green" && needed < lane.perWeek && unused > 0) action = { kind: "fewer", trucks: unused };
+      return { wk, week, booked, adds, cuts, needed, extra, cover, contract, spot, capSpot, change, zone, unused, action };
     }),
   }));
 }
 
-// ---------- Totals for the hub, and the same items "the old way" ----------
+// ---------- Totals for the dashboard, and the same items "the old way" ----------
 export function totals(items, now, opts) {
   const alloc = allocate(items, now, opts);
   const t = { trucks: 0, contract: 0, spot: 0, overspend: 0, making: 0, extra: 0, profit: 0 };
