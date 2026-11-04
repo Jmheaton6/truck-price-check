@@ -138,3 +138,76 @@ test("PO numbers follow arrival order; a change shows its PO's number", () => {
   const a = po("Cincinnati, OH", 2, "2026-11-19"), b = po("Columbus, OH", 2, "2026-11-19"), ch = change(a, 1);
   assert.deepEqual([a, b, ch].map((x) => E.poNumber([a, b, ch], x)), ["PO-1001", "PO-1002", "PO-1001"]);
 });
+
+// ---------- Forecast early warning ----------
+const fcast = (customer, week, trucks, on = NOW) => ({ id: "f" + t, type: "forecast", status: "noted", created_at: ts(), data: { customer, week, trucks, on } });
+const ask = (lane, week, trucks, status, accepted) => ({ id: "a" + t, type: "ask", status, created_at: ts(), data: { kind: lane.kind, destination: lane.destination, week, date: week, trucks, accepted } });
+const wkOf = (items, customer, wk) => E.outlook(items, NOW).find((r) => r.customer === customer).weeks[wk];
+
+test("forecast zones: 10% / 25% bands, and a zero baseline is new demand", () => {
+  assert.equal(E.zoneOf(10, 11), "G");
+  assert.equal(E.zoneOf(10, 12), "Y");
+  assert.equal(E.zoneOf(8, 14), "R");
+  assert.equal(E.zoneOf(8, 4), "R");
+  assert.equal(E.zoneOf(0, 3), "N");
+  assert.equal(E.zoneOf(0, 0), "G");
+});
+
+test("versions: the baseline stays, the latest wins, history is kept", () => {
+  const items = [fcast("Cincinnati, OH", "2026-11-22", 12), fcast("Cincinnati, OH", "2026-11-22", 14)];
+  const v = E.forecastVersions(items, "Cincinnati, OH", 3, NOW);
+  assert.deepEqual(v.map((x) => x.trucks), [8, 12, 14]);
+  const w = wkOf(items, "Cincinnati, OH", 3);
+  assert.deepEqual([w.base, w.latest, w.change, w.zone, w.gap], [8, 14, 6, "R", 6]);
+});
+
+test("a steady forecast can still have an uncovered truck (orders above forecast)", () => {
+  const p = po("Cincinnati, OH", 9, "2026-11-25", "confirmed"); // forecast 8, ordered 9
+  const w = wkOf([p], "Cincinnati, OH", 3);
+  assert.equal(w.zone, "G");
+  assert.equal(w.gap, 1);
+  assert.equal(E.warnings([p], NOW)[0].n, 1);
+});
+
+test("orders consume the forecast: need is the larger, not the sum", () => {
+  const items = [fcast("Cincinnati, OH", "2026-11-22", 12), po("Cincinnati, OH", 14, "2026-11-25", "confirmed")];
+  const w = wkOf(items, "Cincinnati, OH", 3);
+  assert.deepEqual([w.ordered, w.left, w.need], [14, 0, 14]);
+});
+
+test("early warning → carrier yes covers the gap; a partial yes covers only what it accepted", () => {
+  const lane = cin();
+  const f = fcast("Cincinnati, OH", "2026-11-22", 14);
+  const ans = E.carrierAnswer([f], lane, "2026-11-22", 6, NOW);
+  assert.deepEqual([ans.status, ans.accepted], ["yes", 6]); // 17 days' notice, cap 9
+  assert.equal(wkOf([f, ask(lane, "2026-11-22", 6, "yes", 6)], "Cincinnati, OH", 3).gap, 0);
+  assert.equal(wkOf([f, ask(lane, "2026-11-22", 6, "part", 4)], "Cincinnati, OH", 3).gap, 2);
+  // Under 7 days, the carrier can't add trucks.
+  assert.equal(E.carrierAnswer([f], lane, "2026-11-08", 6, NOW).status, "no");
+});
+
+test("demand drops: trucks no one needs show up, and releasing them clears it", () => {
+  const lane = cin();
+  const f = fcast("Cincinnati, OH", "2026-11-22", 4);
+  const warn = E.warnings([f], NOW);
+  assert.deepEqual([warn[0].kind, warn[0].n], ["down", 4]);
+  const items = [f, ask(lane, "2026-11-22", -4, "yes", -4)];
+  assert.equal(E.warnings(items, NOW).length, 0);
+  assert.equal(wkOf(items, "Cincinnati, OH", 3).cover, 4);
+});
+
+test("the same PO with and without the warning (Nov 25, 14 truckloads)", () => {
+  const lane = cin();
+  const cold = po("Cincinnati, OH", 14, "2026-11-25");
+  const c1 = E.checks([cold], cold, NOW);
+  assert.deepEqual(E.TEAMS.map((x) => c1[x].ok), [false, true, false, false]); // over forecast, short line time, 6 spot
+  const f = fcast("Cincinnati, OH", "2026-11-22", 14);
+  const a = ask(lane, "2026-11-22", 6, "yes", 6);
+  const warm = po("Cincinnati, OH", 14, "2026-11-25");
+  const c2 = E.checks([f, a, warm], warm, NOW);
+  assert.deepEqual(E.TEAMS.map((x) => c2[x].ok), [true, true, true, true]);
+  assert.equal(c2.alloc.spot, 0);
+  // Told too late for Production to plan (under 2 weeks before the week): line time stays short.
+  const late = fcast("Cincinnati, OH", "2026-11-22", 14, "2026-11-12");
+  assert.equal(E.plannedLine([late], 3, NOW), 0);
+});

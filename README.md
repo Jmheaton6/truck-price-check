@@ -7,7 +7,8 @@ Live: https://jmheaton6.github.io/truck-price-check/
 ## Screens
 | Screen | Link | What happens |
 |---|---|---|
-| Customer HQ | `?role=customer` | Pick your company (top right). New order: cans (millions) and a delivery date. My orders: status, Change, and a "Try [date]" button when Ball can't do the date asked |
+| Customer HQ | `?role=customer` | Pick your company (top right). New order: cans (millions) and a delivery date. My forecast: the next 6 weeks; Share forecast sends Ball a new version. My orders: status, Change, and a "Try [date]" button when Ball can't do the date asked |
+| Outlook | `?role=outlook` | Forecast early warning. The next 6 weeks per customer: trucks needed, how far the forecast moved (green ≤10%, amber 10–25%, red 25%+), and trucks still open. Logistics asks the carrier for the gap while there's 7+ days' notice, or releases trucks when demand drops. Click a week for its forecast versions, orders, and trucks |
 | Orders | `?role=orders` | Pick your department (top right). Each department reads one check line and clicks Accept or Deny. One deny stops the order; four accepts send it to Trucks. Logistics can ask the carrier for more trucks before answering |
 | Trucks | `?role=calendar` | A week per page: a square per truck (solid = booked, outline = to book, red = spot, dashed = not accepted yet), and "Open" = contract trucks still free that week. To book: one row per order or transfer, with its book-by date, Book and Book all |
 | Transfers | `?role=transfers` | Pick a warehouse, truckloads and a start date; compare shipping it all on one day vs. over 1, 2 or 3 weeks; put the best one on the calendar |
@@ -24,6 +25,7 @@ Flags: `&today=2026-11-05` rehearses a date; `&local` is backup mode (this lapto
 - **Booking:** a truck not booked 3+ days before it moves goes spot.
 - **Ask the carrier:** with 7+ days' notice it can add up to 25% of its weekly trucks; with less, no.
 - **Checks:** Sales, the customer's week can run up to 10% over its forecast and must be 3+ days out. Inventory, labeled cans in stock; a cut after the cans are made strands them. Production, line time that week and the 5-day freeze. Logistics, all trucks on contract.
+- **Forecast:** the baseline (what the carrier plan is sized for) never changes; each update is a new version and the latest one counts. Orders consume the forecast: a week needs the larger of the two, not the sum. Sales checks against the latest forecast. Told 2+ weeks before the week starts, Production plans the extra line time.
 - **Spot cost** = the lane's spot premium per spot truck (2026 data).
 - **Saved** = spot cost the old way (every order accepted as first asked, no carrier asks, transfers all on one day) minus spot cost now, on the pilot's own orders and transfers.
 - **Scorecards:** Sales, time to answer customers. Inventory, truckloads stranded. Production, line time used. Logistics, spot share and share booked 3+ days ahead.

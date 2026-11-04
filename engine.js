@@ -17,6 +17,9 @@ export const RULES = {
   weeks: 6,              // horizon
   weeksOf2026: 30.3,     // Jan 1 – Jul 31, 2026
   spotGoal: 0.08,        // the deck's target
+  watchBand: 0.10,       // forecast moved more than 10%: watch it
+  actBand: 0.25,         // more than 25%: act on it
+  planAheadDays: 14,     // simulated: told 2+ weeks before the week starts, Production can plan extra line time
   spotToday: 0.158,      // 2026 YTD spot share, shuttles excluded
 };
 
@@ -70,12 +73,41 @@ export const bookedTrucks = (lane, wk) => lane.kind === "order"
   : Math.round(lane.perWeek * (SIM_BOOKED[lane.key]?.[wk] ?? 1));
 export const trucksFromCans = (cans) => Math.max(1, Math.ceil(cans / RULES.cansPerTruck));
 
+// ---------- Forecast versions ----------
+// Version 0 is the baseline the carrier plan is sized for. Later versions are what customers shared since.
+export function forecastVersions(items, customer, wk, now) {
+  const week = addDays(weekKey(now), wk * 7);
+  return [{ trucks: forecastOf(customer, wk), on: null, baseline: true },
+    ...items.filter((x) => x.type === "forecast" && x.data.customer === customer && x.data.week === week).sort(byCreated)
+      .map((x) => ({ trucks: x.data.trucks, on: x.data.on, id: x.id }))];
+}
+export const latestForecast = (items, customer, wk, now) => forecastVersions(items, customer, wk, now).at(-1).trucks;
+// G steady (≤10%), Y watch (≤25%), R act (>25%), N new demand on a zero baseline.
+export function zoneOf(base, latest) {
+  if (!base) return latest ? "N" : "G";
+  const chg = Math.abs(latest - base) / base;
+  return chg <= RULES.watchBand ? "G" : chg <= RULES.actBand ? "Y" : "R";
+}
+// Extra line time Production planned because a customer warned 2+ weeks ahead (raises only).
+export function plannedLine(items, wk, now) {
+  const cutoff = addDays(addDays(weekKey(now), wk * 7), -RULES.planAheadDays);
+  let extra = 0;
+  for (const customer of Object.keys(SIM_CUSTOMERS)) {
+    const v = forecastVersions(items, customer, wk, now);
+    const early = v.filter((x) => !x.baseline && x.on <= cutoff).at(-1);
+    if (early) extra += Math.max(0, Math.min(early.trucks, v.at(-1).trucks) - v[0].trucks);
+  }
+  return extra;
+}
+
 // ---------- Items (what the app saves; one table, jsonb data) ----------
 // order:    a customer PO (data.kind "po") or a change to one (data.kind "change", parent, trucks ±).
 //           data { customer, kind, parent?, trucks, cans, date, signoffs{team:{ok,at}}, denied?{team,why}, retry_of?, booked{day:ts} }
 //           status: waiting (being checked) → confirmed (all four accepted) or declined (a department denied it)
 // transfer: Ball moving its own cans to a warehouse. data { destination, trucks, date, pattern, booked{day:ts} }; status booked
-// ask:      Logistics asked a lane's carrier for +N. data { kind, destination, week, date, trucks, accepted }; status yes|part|no
+// forecast: a customer's new forecast for one week. data { customer, week (that Sunday), trucks, on (the day shared) }.
+//           Every update is a new version; the baseline (SIM_CUSTOMERS) is never overwritten.
+// ask:      Logistics asked a lane's carrier for +N (or released N: trucks and accepted negative). data { kind, destination, week, date, trucks, accepted }; status yes|part|no
 export const TEAMS = ["sales", "inventory", "production", "logistics"];
 export const isActive = (it) => it.status !== "declined"; // a denied order or a removed transfer moves nothing
 const shipsTrucks = (it) => (it.type === "order" || it.type === "transfer") && isActive(it);
@@ -119,7 +151,7 @@ export function spreadDays(date, n, pattern = "day") {
 export function carrierExtras(items, now) {
   const out = new Map();
   for (const it of items) {
-    if (it.type !== "ask" || it.data.trucks <= 0 || !(it.status === "yes" || it.status === "part")) continue;
+    if (it.type !== "ask" || !it.data.trucks || !(it.status === "yes" || it.status === "part")) continue;
     const k = `${itemLane(it).key}|${weekIndex(it.data.week, now)}`;
     out.set(k, (out.get(k) || 0) + (it.data.accepted ?? it.data.trucks));
   }
@@ -131,7 +163,7 @@ export function carrierAnswer(items, lane, date, trucks, now) {
   const days = daysBetween(now, date);
   if (days < RULES.carrierFlexNoticeDays) return { status: "no", accepted: 0, why: `No: only ${days} days' notice` };
   const wk = weekIndex(date, now);
-  const already = carrierExtras(items, now).get(`${lane.key}|${wk}`) || 0;
+  const already = Math.max(0, carrierExtras(items, now).get(`${lane.key}|${wk}`) || 0);
   const cap = Math.ceil(lane.perWeek * RULES.carrierFlexShare);
   const accepted = Math.max(0, Math.min(trucks, cap - already));
   if (accepted === trucks) return { status: "yes", accepted, why: `Yes: +${trucks}` };
@@ -206,7 +238,7 @@ export function allocate(items, now, opts = {}) {
 // ---------- Production and inventory (simulated stock and line time, first come first served) ----------
 export function planUse(items, now) {
   const stockLeft = Object.fromEntries(Object.entries(SIM_CUSTOMERS).map(([k, c]) => [k, c.stock]));
-  const lineLeft = [...SIM_LINE_TIME];
+  const lineLeft = SIM_LINE_TIME.map((n, wk) => n + plannedLine(items, wk, now));
   const out = new Map();
   for (const it of items.filter((x) => x.type === "order" && isActive(x)).sort(byCreated)) {
     const trucks = it.data.trucks;
@@ -234,7 +266,7 @@ export function checks(items, it, now) {
   const n = Math.abs(it.data.trucks);
 
   // Sales: the customer's total that week (POs and changes so far) can run up to 10% over its forecast.
-  const fc = forecastOf(it.data.customer, wk);
+  const fc = latestForecast(items, it.data.customer, wk, now);
   const weekTotal = items
     .filter((x) => x.type === "order" && isActive(x) && x.data.customer === it.data.customer
       && byCreated(x, it) <= 0 && weekIndex(dateOf(x), now) === wk)
@@ -410,4 +442,41 @@ export function savingsBy(items, now) {
   const base = totals(items, now).overspend;
   const one = (k) => Math.max(0, totals(items, now, { [k]: true }).overspend - base);
   return { checkoff: one("oldOrders"), transfers: one("oldTransfers"), carrier: one("noAsks") };
+}
+
+// ---------- Forecast early warning ----------
+// Per customer, per week: forecast movement (baseline vs. latest) and truck coverage, kept apart, so a steady
+// forecast never hides trucks nobody has covered. Orders consume the forecast: the week needs the larger of the two.
+export function outlook(items, now) {
+  const extras = carrierExtras(items, now);
+  return PILOT_LANES.filter((l) => l.kind === "order").map((lane) => {
+    const customer = lane.destination;
+    const weeks = Array.from({ length: RULES.weeks }, (_, wk) => {
+      const week = addDays(weekKey(now), wk * 7);
+      const versions = forecastVersions(items, customer, wk, now);
+      const base = versions[0].trucks, latest = versions.at(-1).trucks;
+      const inWeek = items.filter((x) => x.type === "order" && x.data.customer === customer && weekIndex(dateOf(x), now) === wk);
+      const ordered = inWeek.filter((x) => x.status === "confirmed").reduce((s, x) => s + x.data.trucks, 0);
+      const pending = inWeek.filter((x) => x.status === "waiting").reduce((s, x) => s + x.data.trucks, 0);
+      const need = Math.max(latest, ordered);
+      const extra = extras.get(`${lane.key}|${wk}`) || 0;
+      const cover = base + extra;
+      const daysOut = daysBetween(now, week);
+      return { wk, week, versions, base, latest, change: latest - base, zone: zoneOf(base, latest),
+        ordered, pending, left: Math.max(0, latest - ordered), need, extra, cover,
+        gap: Math.max(0, need - cover), surplus: Math.max(0, cover - need),
+        askBy: addDays(week, -RULES.carrierFlexNoticeDays), canAsk: daysOut >= RULES.carrierFlexNoticeDays,
+        releaseBy: addDays(week, -RULES.noticeDays), canRelease: daysOut >= RULES.noticeDays };
+    });
+    return { lane, customer, weeks };
+  });
+}
+// What Logistics should act on: weeks with uncovered trucks or trucks no one will need.
+export function warnings(items, now) {
+  const out = [];
+  for (const row of outlook(items, now)) for (const w of row.weeks) {
+    if (w.gap) out.push({ ...w, lane: row.lane, customer: row.customer, kind: "up", n: w.gap });
+    else if (w.surplus && w.latest < w.base) out.push({ ...w, lane: row.lane, customer: row.customer, kind: "down", n: w.surplus });
+  }
+  return out.sort((a, b) => a.wk - b.wk || (b.zone === "R") - (a.zone === "R"));
 }

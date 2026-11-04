@@ -265,3 +265,31 @@ input:hover, select:hover { border-color: var(--muted); }
 .tobook .row-top { gap: 8px; }
 .tobook .row-top strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tobook .by { white-space: nowrap; flex: none; }
+
+/* ---------- Outlook ---------- */
+.ol-h { margin: 0; font-size: 1.6rem; }
+.z { display: inline-block; border-radius: 999px; padding: 0 8px; font-size: 12px; font-weight: 700; margin-left: 6px; }
+.z-G { background: var(--green-bg); color: var(--green); }
+.z-Y { background: #f6e7c1; color: #7a5a00; }
+.z-R { background: var(--red-bg); color: var(--red); }
+.z-N { background: var(--lteal); color: var(--navy); }
+.cal.ol td { height: 76px; }
+.ol-cell { flex-direction: column; flex-wrap: nowrap; gap: 4px; padding: 8px 10px; }
+.ol-cell .z { margin: 0; align-self: flex-start; }
+.ol-n { font: 400 24px/1 var(--serif); }
+.ol-gap { font-size: 12px; font-weight: 700; color: var(--red); }
+.ol-sur { font-size: 12px; font-weight: 700; color: #7a5a00; }
+.ol-ok { font-size: 12px; font-weight: 700; color: var(--green); display: inline-flex; align-items: center; }
+.cal.ol thead th { font-weight: 600; }
+.side .big-label { margin-top: 6px; }
+
+/* ---------- Customer forecast ---------- */
+.c-fc { grid-column: 1 / -1; }
+.c-fc .card-head { margin-bottom: 14px; }
+.c-fc h2 { margin: 0; }
+.f-weeks { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.f-week { display: block; padding: 12px; border-radius: 12px; background: var(--cream); border: 1.5px solid transparent; }
+.f-week input { font: 400 22px var(--serif); padding: 8px 10px; background: var(--white); }
+.f-t { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); }
+.f-changed { border-color: var(--teal); background: var(--white); }
+.cal-head h1.ol-h { min-width: 0; text-align: left; }

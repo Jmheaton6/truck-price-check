@@ -1,14 +1,14 @@
-import * as E from "./engine.js?v=35";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=35";
+import * as E from "./engine.js?v=36";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=36";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
 const NOW = PARAMS.get("today") || E.isoDate(new Date()); // ?today=2026-11-05 to rehearse a date
 const FORCE_LOCAL = PARAMS.has("local");                   // ?local = backup if the room's Wi-Fi fails
 
-const BALL = { orders: "Orders", calendar: "Trucks", transfers: "Transfers", exec: "Executive" };
+const BALL = { outlook: "Outlook", orders: "Orders", calendar: "Trucks", transfers: "Transfers", exec: "Executive" };
 const ALIASES = { review: "orders", pos: "orders", team: "orders", ball: "orders", sales: "orders", inventory: "orders", production: "orders",
-  logistics: "calendar", schedule: "calendar", outlook: "calendar", carrier: "calendar", plan: "calendar", hub: "exec", dashboard: "exec" };
+  logistics: "calendar", schedule: "calendar", forecast: "outlook", warning: "outlook", carrier: "calendar", plan: "calendar", hub: "exec", dashboard: "exec" };
 const DEPT = { sales: "Sales", inventory: "Inventory", production: "Production", logistics: "Logistics", exec: "Executive" };
 const LAST_DAY = E.addDays(E.weekKey(NOW), RULES.weeks * 7 - 1);
 
@@ -43,6 +43,14 @@ async function makeStore() {
     reset: async () => write([]),
     subscribe(cb) { listeners.push(cb); addEventListener("storage", (e) => e.key === KEY && cb()); },
   };
+}
+
+// Forecast versions are saved as "ask" rows with status "noted" and data.kind "forecast", so the items table
+// needs no new SQL. The rest of the app sees them as type "forecast".
+function withForecasts(store) {
+  const out = (r) => (r.type === "ask" && r.data?.kind === "forecast" ? { ...r, type: "forecast" } : r);
+  const inn = (r) => (r.type === "forecast" ? { ...r, type: "ask", status: "noted", data: { ...r.data, kind: "forecast" } } : r);
+  return { ...store, list: async () => (await store.list()).map(out), add: async (row) => out(await store.add(inn(row))) };
 }
 
 // ---------- Helpers ----------
@@ -117,6 +125,7 @@ function carrierSaid(items, lane, day) {
   const wk = E.weekKey(day);
   const last = items.filter((x) => x.type === "ask" && x.data.destination === lane.destination && x.data.kind === lane.kind && x.data.week === wk).at(-1);
   if (!last) return { canAsk: true, text: "" };
+  if (last.data.trucks < 0) return { canAsk: true, text: `Released ${-last.data.accepted}` };
   const text = last.status === "yes" ? `Carrier added ${last.data.accepted}` : last.status === "part" ? `Carrier added ${last.data.accepted}: its limit that week` : "Carrier said no";
   return { canAsk: last.status === "yes", text };
 }
@@ -138,7 +147,33 @@ function customerView(store, state) {
   const html = `<div class="cols cols-cust">
     <section class="panel" id="c-form"></section>
     <section class="panel"><h2>My orders</h2><div id="c-mine" class="cards"><p class="empty">Loading…</p></div></section>
+    <section class="panel c-fc"><div class="card-head"><h2>My forecast</h2><button type="button" id="f-send" class="util on">Share forecast</button></div>
+      <div id="f-weeks" class="f-weeks"></div></section>
   </div>`;
+  const fc = { company: null, m: [] }; // what's typed, in million cans per week
+  const fcLatest = () => Array.from({ length: RULES.weeks }, (_, wk) => E.latestForecast(state.items, state.company, wk, NOW));
+  function drawForecast() {
+    if (fc.company !== state.company) { fc.company = state.company; fc.m = fcLatest().map(millions); }
+    const latest = fcLatest();
+    $("#f-weeks").innerHTML = fc.m.map((m, wk) => {
+      const n = fromMillions(m);
+      return `<label class="f-week${n !== latest[wk] ? " f-changed" : ""}"><span class="label">${esc(fmtShort(E.addDays(E.weekKey(NOW), wk * 7)))}</span>
+        <input type="number" min="0" max="40" step="0.2" data-fw="${wk}" value="${m}" aria-label="Million cans, week of ${esc(fmtShort(E.addDays(E.weekKey(NOW), wk * 7)))}">
+        <span class="f-t">${plural(n, "truckload")}</span></label>`;
+    }).join("");
+  }
+  async function shareForecast(btn) {
+    const latest = fcLatest();
+    const changed = fc.m.map((m, wk) => ({ wk, trucks: fromMillions(m) })).filter((x) => x.trucks !== latest[x.wk]);
+    if (!changed.length) return toast("Nothing changed.", true);
+    btn.disabled = true;
+    try {
+      for (const x of changed) await store.add({ type: "forecast", status: "noted", data: { customer: state.company, week: E.addDays(E.weekKey(NOW), x.wk * 7), trucks: x.trucks, on: NOW } });
+      toast("Forecast shared.");
+      state.refresh();
+    } catch (err) { toast("Couldn't share: " + err.message, true); }
+    finally { btn.disabled = false; }
+  }
   const changing = () => (form.changeOf ? byId(state.items, form.changeOf) : null);
 
   function drawForm() {
@@ -188,10 +223,20 @@ function customerView(store, state) {
 
   function mount() {
     drawForm();
+    $("#f-weeks").addEventListener("input", (e) => {
+      const i = e.target.dataset.fw;
+      if (i == null) return;
+      fc.m[+i] = +e.target.value || 0;
+      const lab = e.target.closest(".f-week");
+      const n = fromMillions(fc.m[+i]);
+      lab.querySelector(".f-t").textContent = plural(n, "truckload");
+      lab.classList.toggle("f-changed", n !== fcLatest()[+i]);
+    });
     $("#app").addEventListener("click", (e) => {
       const b = e.target.closest("button");
       if (!b) return;
       if (b.id === "c-send") return send(b);
+      if (b.id === "f-send") return shareForecast(b);
       if (b.id === "c-cancel") { form.changeOf = null; form.m = 2; return drawForm(); }
       if (b.dataset.change) {
         form.changeOf = b.dataset.change;
@@ -235,6 +280,110 @@ function customerView(store, state) {
         ${changesOf(items, po).map((c) => `<div class="sub-line">${line(items, c)}</div>`).join("")}
       </article>`).join("") : `<p class="empty">No orders yet.</p>`;
     if (!form.changeOf) paint();
+    if (fc.company !== state.company || !document.activeElement?.dataset?.fw) drawForecast(); // don't redraw under someone typing
+  }
+
+  return { html, mount, live };
+}
+
+// ---------- Ball HQ · Outlook (forecast early warning: the next 6 weeks per customer) ----------
+function outlookView(store, state) {
+  let pick = null; // "customer@wk"
+  const html = `<div class="cols cols-cal">
+    <section class="panel"><div class="cal-head"><h1 class="ol-h">Next 6 weeks</h1>
+      <span class="legend">Forecast moved <span class="z z-G">≤10%</span><span class="z z-Y">10–25%</span><span class="z z-R">25%+</span></span></div>
+      <div id="ol"></div></section>
+    <section class="panel side" id="ol-side"></section>
+  </div>`;
+  const zoneText = (w) => (w.zone === "N" ? "New" : `${w.change > 0 ? "+" : "−"}${Math.round(Math.abs(w.change) / w.base * 100)}%`);
+
+  function mount() {
+    $("#app").addEventListener("click", async (e) => {
+      const cell = e.target.closest("[data-ol]");
+      if (cell) { pick = pick === cell.dataset.ol ? null : cell.dataset.ol; return live(state.items); }
+      if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
+      const b = e.target.closest("button[data-olask], button[data-olrelease]");
+      if (!b) return;
+      if (state.dept !== "logistics") return toast("Switch to Logistics.", true);
+      b.disabled = true;
+      try {
+        const lane = E.laneOf("order", b.dataset.customer);
+        const week = b.dataset.week;
+        const base = { kind: lane.kind, destination: lane.destination, week, date: week };
+        if (b.dataset.olask) {
+          const n = +b.dataset.olask;
+          const ans = E.carrierAnswer(state.items, lane, week, n, NOW);
+          await store.add({ type: "ask", status: ans.status, data: { ...base, trucks: n, accepted: ans.accepted } });
+          toast(`Carrier: ${ans.why}`, ans.status === "no");
+        } else {
+          const n = +b.dataset.olrelease;
+          await store.add({ type: "ask", status: "yes", data: { ...base, trucks: -n, accepted: -n } });
+          toast(`Released ${plural(n, "truck")}.`);
+        }
+        state.refresh();
+      } catch (err) { toast("Couldn't save: " + err.message, true); b.disabled = false; }
+    });
+  }
+
+  // The one button for a week, if there is one: ask for the gap early, or release trucks no one needs.
+  function action(items, row, w) {
+    if (state.dept !== "logistics") return "";
+    const said = carrierSaid(items, row.lane, w.week);
+    const data = `data-customer="${esc(row.customer)}" data-week="${w.week}"`;
+    if (w.gap && w.canAsk && said.canAsk) return `<button type="button" class="util on small" data-olask="${w.gap}" ${data}>Ask +${w.gap}</button>`;
+    if (!w.gap && w.surplus && w.latest < w.base && w.canRelease) return `<button type="button" class="util small" data-olrelease="${w.surplus}" ${data}>Release ${w.surplus}</button>`;
+    return "";
+  }
+  const status = (w) => w.gap ? `<span class="ol-gap">${w.gap} open</span>`
+    : w.surplus && w.latest < w.base ? `<span class="ol-sur">${w.surplus} extra</span>`
+    : w.extra ? `<span class="ol-ok">${icon("check")}Covered</span>` : "";
+
+  function side(items, rows) {
+    if (pick) {
+      const [customer, wk] = pick.split("@");
+      const row = rows.find((r) => r.customer === customer);
+      const w = row.weeks[+wk];
+      const said = carrierSaid(items, row.lane, w.week);
+      return `<button type="button" class="linkish back" id="side-back">${icon("left")}To act on</button>
+        <h2>${esc(custName(customer))}</h2><p class="side-lane">${esc(weekLabel(w.week))}</p>
+        <p class="big-label">Forecast</p>
+        <ul class="moves">${w.versions.map((v, i) => `<li><span>${v.baseline ? "Plan" : esc(fmtShort(v.on))}</span><span>${i && w.versions[i - 1].trucks !== v.trucks
+          ? `<span class="t-chk">${w.versions[i - 1].trucks} →</span> ` : ""}<strong>${v.trucks}</strong></span></li>`).join("")}</ul>
+        <p class="big-label">Orders</p>
+        <ul class="moves"><li><span>Accepted</span><strong>${w.ordered}</strong></li>${w.pending ? `<li><span>Checking</span><strong>${w.pending}</strong></li>` : ""}<li><span>Forecast left</span><strong>${w.left}</strong></li></ul>
+        <p class="big-label">Trucks</p>
+        <ul class="moves"><li><span>Needed</span><strong>${w.need}</strong></li><li><span>Contract</span><strong>${w.base}${w.extra ? ` ${w.extra > 0 ? "+" : "−"} ${Math.abs(w.extra)}` : ""}</strong></li>
+          <li><span>${!w.gap && w.surplus ? "Extra" : "Open"}</span><strong class="${w.gap ? "t-spot" : ""}">${w.gap || w.surplus}</strong></li></ul>
+        ${w.gap && !w.canAsk ? `<p class="why">Under ${RULES.carrierFlexNoticeDays} days: ${plural(w.gap, "spot truck")}</p>` : ""}
+        ${action(items, row, w).replace("small", "wide")}
+        ${said.text ? `<p class="said">${esc(said.text)}</p>` : ""}`;
+    }
+    const list = E.warnings(items, NOW);
+    if (!list.length) return `<h2>To act on</h2><p class="empty">Nothing. Every week is covered.</p>`;
+    return `<h2>To act on</h2><ul class="tobook">${list.map((x) => {
+      const row = rows.find((r) => r.customer === x.customer);
+      const by = x.kind === "up" ? x.askBy : x.releaseBy;
+      return `<li class="tb-row"><button type="button" class="row" data-ol="${esc(x.customer)}@${x.wk}">
+          <span class="row-top"><strong>${esc(custName(x.customer))}</strong>${x.kind === "up" && !x.canAsk ? `<span class="by by-soon">spot</span>` : `<span class="by${E.daysBetween(NOW, by) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(by))}</span>`}</span>
+          <span class="row-sub">${esc(weekLabel(x.week))}</span>
+          <span class="row-sub">${x.kind === "up" ? `<span class="t-spot">${x.n} open</span>` : `<span class="t-chk">${x.n} extra</span>`}</span></button>
+        ${action(items, row, x)}</li>`;
+    }).join("")}</ul>${state.dept !== "logistics" ? `<p class="small">Logistics acts on these.</p>` : ""}`;
+  }
+
+  function live(items) {
+    const rows = E.outlook(items, NOW);
+    const weeks = rows[0].weeks.map((w) => w.week);
+    $("#ol").innerHTML = `<div class="table-wrap"><table class="cal ol">
+      <thead><tr><th></th>${weeks.map((d, i) => `<th>${i === 0 ? "This week" : "Week of"} <span>${esc(fmtShort(d))}</span></th>`).join("")}</tr></thead>
+      <tbody>${rows.map((r) => `<tr><th scope="row">${esc(custName(r.customer))}<span class="city">${esc(r.customer)}</span></th>
+        ${r.weeks.map((w) => {
+          const key = `${r.customer}@${w.wk}`;
+          const cls = [w.gap ? "c-spot" : "", pick === key ? "c-pick" : ""].join(" ");
+          return `<td class="${cls}"><button type="button" class="cell ol-cell" data-ol="${esc(key)}" aria-label="${esc(custName(r.customer))}, week of ${esc(fmtShort(w.week))}">
+            <span class="ol-n">${w.need}</span>${w.change || w.zone === "N" ? `<span class="z z-${w.zone}">${zoneText(w)}</span>` : ""}${status(w)}</button></td>`;
+        }).join("")}</tr>`).join("")}</tbody></table></div>`;
+    $("#ol-side").innerHTML = side(items, rows);
   }
 
   return { html, mount, live };
@@ -606,11 +755,12 @@ function execView(store, state) {
     const waiting = (t) => orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[t]).length;
     const wait = (t) => (waiting(t) ? ` · <strong>${waiting(t)} waiting</strong>` : "");
     const toBook = E.toBookItems(items, NOW).length;
+    const warn = E.warnings(items, NOW).length;
     $("#x-cards").innerHTML =
       card("Sales", m == null ? "–" : m < 60 ? `${Math.max(1, Math.round(m))} min` : `${(m / 60).toFixed(1)} hr`, `to answer · goal 4 hr${wait("sales")}`, m == null ? null : m <= 240) +
       card("Inventory", `${s.inventory.stranded}`, `truckloads stranded${wait("inventory")}`, s.inventory.stranded === 0) +
       card("Production", pct(s.production.share), `line time used${wait("production")}`, null) +
-      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked 3+ days ahead${wait("logistics")}${toBook ? ` · <strong>${toBook} to book</strong>` : ""}`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null);
+      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked 3+ days ahead${wait("logistics")}${toBook ? ` · <strong>${toBook} to book</strong>` : ""}${warn ? ` · <strong>${warn} warnings</strong>` : ""}`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null);
   }
 
   return { html, mount, live };
@@ -636,7 +786,7 @@ async function main() {
   // Who's using it: a department (Ball) or a company (customer). Old links like ?role=sales pick the department.
   const savedDept = localStorage.getItem("bc_dept");
   const state = { items: [], refresh: null,
-    dept: TEAMS.includes(asked) ? asked : asked === "logistics" || ((role === "calendar" || role === "transfers") && !savedDept) ? "logistics"
+    dept: TEAMS.includes(asked) ? asked : asked === "logistics" || ((role === "calendar" || role === "transfers" || role === "outlook") && !savedDept) ? "logistics"
       : role === "exec" && !savedDept ? "exec" : DEPT[savedDept] ? savedDept : "sales",
     company: SIM_CUSTOMERS[localStorage.getItem("bc_company")] ? localStorage.getItem("bc_company") : "Cincinnati, OH" };
   if (portal === "ball") localStorage.setItem("bc_dept", state.dept);
@@ -647,11 +797,12 @@ async function main() {
     ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>`
     : portal === "ball" ? `<select id="who-sel" aria-label="Department">${Object.entries(DEPT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` : "";
 
-  const store = await makeStore();
+  const store = withForecasts(await makeStore());
   const drawNav = (items = []) => {
     if (portal !== "ball") { $("#nav").innerHTML = ""; return; }
     const mine = TEAMS.includes(state.dept) ? orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[state.dept]).length : 0;
-    const count = { orders: mine, calendar: state.dept === "logistics" ? E.toBookItems(items, NOW).length : 0 };
+    const isLog = state.dept === "logistics";
+    const count = { outlook: isLog ? E.warnings(items, NOW).length : 0, orders: mine, calendar: isLog ? E.toBookItems(items, NOW).length : 0 };
     $("#nav").innerHTML = Object.entries(BALL).map(([r, name]) =>
       `<a href="${link(r)}" class="${r === role ? "on" : ""}">${name}${count[r] ? ` <span class="count">${count[r]}</span>` : ""}</a>`).join("");
   };
@@ -672,6 +823,7 @@ async function main() {
 
   const view = portal === "home" ? homeView()
     : portal === "customer" ? customerView(store, state)
+    : role === "outlook" ? outlookView(store, state)
     : role === "orders" ? ordersView(store, state)
     : role === "calendar" ? calendarView(store, state)
     : role === "transfers" ? transfersView(store, state)

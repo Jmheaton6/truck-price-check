@@ -252,6 +252,63 @@ await task(async () => {
   await click("Accept", { exact: true });
 });
 
+// ---------- Early warning: the customer tells Ball weeks ahead ----------
+persona("Pat (customer, Customer A buyer)", "forecast", "Our Nov 29 week has a promo: tell Ball it'll be 2.8 million cans.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await pick("Company", "Customer A");
+  await look("forecast before");
+  await fill("week of Nov 29", 2.8);
+  await click("Share forecast");
+  if (!/shared/i.test(await toastText())) issue("No sign the forecast went to Ball.");
+});
+persona("Lee (Logistics)", "outlook", "See what's coming in the next 6 weeks and line up trucks early.");
+await task(async () => {
+  await go("?role=outlook" + Q);
+  await iAm("Logistics");
+  await look("outlook with warning");
+  await sees("6 open", "how many trucks aren't covered");
+  const ask = page.getByRole("button", { name: /^Ask \+/ });
+  if (!(await ask.count())) { issue("Warning shows, but no way to ask the carrier."); throw new Error("no ask"); }
+  await click((await ask.first().textContent()).trim());
+  if (!/yes/i.test(await toastText())) issue("Carrier didn't say yes with 24 days' notice.");
+  await look("outlook covered");
+  await sees("Covered", "the week is covered now");
+});
+persona("Pat (customer, Customer A buyer)", "forecast-po", "Place the promo order: 2.8 million cans for Wed Dec 2.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await fill("Million cans", 2.8);
+  await fill("Deliver on", "2026-12-02");
+  await click("Send order");
+});
+for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production", "Paolo"], ["Logistics", "Lee"]]) {
+  persona(`${who} (${dept})`, `${dept.toLowerCase()}-fc`, "Answer the promo order Ball was warned about.");
+  await task(async () => {
+    await go("?role=orders" + Q);
+    await iAm(dept);
+    if (await page.locator(".d-mine .d-check.bad").count()) issue(`${dept}'s check fails even though the customer warned Ball 3 weeks ahead.`);
+    await click("Accept", { exact: true });
+  });
+}
+persona("Bo (customer, Customer B buyer)", "forecast-down", "Our Dec 6 week is slow: drop it to 0.4 million cans.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await pick("Company", "Customer B");
+  await fill("week of Dec 6", 0.4);
+  await click("Share forecast");
+});
+persona("Lee (Logistics)", "outlook-down", "A customer's demand dropped. Free up the trucks we won't need.");
+await task(async () => {
+  await go("?role=outlook" + Q);
+  await iAm("Logistics");
+  await sees("extra", "trucks no one will need");
+  const rel = page.getByRole("button", { name: /^Release/ });
+  if (!(await rel.count())) { issue("Extra trucks show, but no way to release them."); throw new Error("no release"); }
+  await click((await rel.first().textContent()).trim());
+  await look("after release");
+});
+
 // ---------- Harder days ----------
 persona("Cy (customer, Customer C buyer)", "edge-late", "Rush: order 0.4 million cans for Sat Nov 7 (2 days out).");
 await task(async () => {
