@@ -318,3 +318,8 @@ body[data-portal="customer"] .nav a.on .count { background: var(--teal); }
 .ed-fields input[type="date"] { font-size: 16px; }
 .ed-btns { display: flex; gap: 8px; }
 .ed-btns .util { flex: 1; }
+.p-result { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 14px; border-radius: 12px; background: var(--cream); margin-bottom: 18px; }
+.p-result .op-sq { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 3px; }
+.p-by { font-size: 14px; font-weight: 600; color: var(--muted); text-align: right; }
+.today { font-weight: 600; }
+.today input { width: auto; font-size: 14px; padding: 2px 8px; margin-left: 6px; border-radius: 6px; background: var(--white); }

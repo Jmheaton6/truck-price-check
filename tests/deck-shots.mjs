@@ -52,21 +52,18 @@ await go("?role=customer&tab=pos" + Q); await shot("11 Customer HQ - denied, try
 await p.getByRole("button", { name: /^Try / }).first().click(); await p.waitForTimeout(400);
 await answerAll();
 
-// 5. Transfers in waves
-await go("?role=transfers" + Q); await dept("Logistics"); await shot("12 Transfers - one day vs waves");
+// 5. Transfers planned ahead
+await go("?role=transfers" + Q); await dept("Logistics"); await shot("12 Transfers - planned ahead");
 await btn("Put on calendar");
 await go("?role=calendar" + Q); await shot("13 Trucks - transfer on the calendar");
 await bookAll();
 
-// 6. Spot avoided by asking the carrier early
-await go("?role=customer" + Q); await p.selectOption("#who-sel", { label: "PepsiCo" }); await p.waitForTimeout(300);
-await p.fill("#c-m", "1.2"); await p.dispatchEvent("#c-m", "input"); await p.fill("#c-date", "2026-11-25"); await p.dispatchEvent("#c-date", "change");
-await btn("Send order");
-for (const d of ["Sales", "Inventory", "Production"]) { await go("?role=orders" + Q); await dept(d); await btn("Accept"); }
-await go("?role=orders" + Q); await dept("Logistics"); await shot("14 Orders - would go spot");
-await p.getByRole("button", { name: /^Ask carrier/ }).first().click(); await p.waitForTimeout(450);
-await shot("15 Orders - carrier says yes"); await btn("Accept");
-await go("?role=calendar" + Q); await bookAll();
+// 6. Early warning: Coca-Cola's promo week, pre-booked weeks ahead
+await go("?role=customer" + Q); await p.selectOption("#who-sel", { label: "Coca-Cola" }); await p.waitForTimeout(300);
+await p.fill('[data-fw="4"]', "2.8"); await p.dispatchEvent('[data-fw="4"]', "input"); await btn("Share forecast");
+await go("?role=outlook" + Q); await dept("Logistics"); await shot("14 Outlook - warning");
+await p.getByRole("button", { name: /^Book \+/ }).first().click(); await p.waitForTimeout(450);
+await shot("15 Outlook - pre-booked");
 
 // 7. Executive
 await go("?role=exec" + Q); await dept("Executive"); await shot("16 Executive");

@@ -1,7 +1,7 @@
-import * as E from "./engine.js?v=38";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=38";
+import * as E from "./engine.js?v=39";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=39";
 
-const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
+const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
 const NOW = PARAMS.get("today") || E.isoDate(new Date()); // ?today=2026-11-05 to rehearse a date
 const FORCE_LOCAL = PARAMS.has("local");                   // ?local = backup if the room's Wi-Fi fails
@@ -59,6 +59,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const money = (n) => (n < 0 ? "−$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US");
 const pct = (x) => Math.round(x * 100) + "%";
 const nowIso = () => new Date().toISOString();
+// When something was booked, on the app's calendar (so rehearsing a later ?today= books on that day).
+const stamp = () => (PARAMS.get("today") ? `${NOW}T12:00:00` : nowIso());
 const fmtDate = (iso) => E.atNoon(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 const fmtShort = (iso) => E.atNoon(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const dow = (iso) => E.atNoon(iso).toLocaleDateString("en-US", { weekday: "short" });
@@ -98,7 +100,7 @@ const stageChip = (it, forCustomer = false) => {
 // What a customer reads when a department says no.
 const customerWhy = (d) => d.team === "sales" ? (/^Only/.test(d.why) ? "Too close to delivery" : "Over your forecast")
   : d.team === "production" ? (/freeze/i.test(d.why) ? "Too close to make" : "No line time that week")
-  : d.team === "inventory" ? "Cans already made" : "No trucks that day";
+  : d.team === "inventory" ? "Cans already made" : "Too late to book trucks";
 
 function toast(msg, bad = false) {
   document.querySelectorAll(".toast").forEach((x) => x.remove());
@@ -120,14 +122,11 @@ addEventListener("error", (e) => showBroken(e.message));
 addEventListener("unhandledrejection", (e) => showBroken(e.reason?.message || String(e.reason)));
 if (typeof E.calendar !== "function") showBroken("old copy of the app");
 
-// The carrier's last answer for a lane and week. After a partial yes or a no, there's nothing more to ask.
-function carrierSaid(items, lane, day) {
+// The last pre-booking or release for a lane-week.
+function preSaid(items, lane, day) {
   const wk = E.weekKey(day);
   const last = items.filter((x) => x.type === "ask" && x.data.destination === lane.destination && x.data.kind === lane.kind && x.data.week === wk).at(-1);
-  if (!last) return { canAsk: true, text: "" };
-  if (last.data.trucks < 0) return { canAsk: true, text: `Released ${-last.data.accepted}` };
-  const text = last.status === "yes" ? `Carrier added ${last.data.accepted}` : last.status === "part" ? `Carrier added ${last.data.accepted}: its limit that week` : "Carrier said no";
-  return { canAsk: last.status === "yes", text };
+  return !last ? "" : last.data.trucks < 0 ? `Released ${-last.data.trucks}` : `Pre-booked ${last.data.trucks}`;
 }
 
 // Truck squares: one per truck. Contract booked = solid, contract to book = outline, spot = red, not accepted = dashed.
@@ -359,7 +358,7 @@ function outlookView(store, state) {
       const cell = e.target.closest("[data-ol]");
       if (cell) { pick = pick === cell.dataset.ol ? null : cell.dataset.ol; return live(state.items); }
       if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
-      const b = e.target.closest("button[data-olask], button[data-olrelease]");
+      const b = e.target.closest("button[data-olbook], button[data-olrelease]");
       if (!b) return;
       if (state.dept !== "logistics") return toast("Switch to Logistics.", true);
       b.disabled = true;
@@ -367,28 +366,20 @@ function outlookView(store, state) {
         const lane = E.laneOf("order", b.dataset.customer);
         const week = b.dataset.week;
         const base = { kind: lane.kind, destination: lane.destination, week, date: week };
-        if (b.dataset.olask) {
-          const n = +b.dataset.olask;
-          const ans = E.carrierAnswer(state.items, lane, week, n, NOW);
-          await store.add({ type: "ask", status: ans.status, data: { ...base, trucks: n, accepted: ans.accepted } });
-          toast(`Carrier: ${ans.why}`, ans.status === "no");
-        } else {
-          const n = +b.dataset.olrelease;
-          await store.add({ type: "ask", status: "yes", data: { ...base, trucks: -n, accepted: -n } });
-          toast(`Released ${plural(n, "truck")}.`);
-        }
+        const n = b.dataset.olbook ? +b.dataset.olbook : -b.dataset.olrelease;
+        await store.add({ type: "ask", status: "yes", data: { ...base, trucks: n, accepted: n, on: NOW } });
+        toast(n > 0 ? `Pre-booked ${plural(n, "truck")}.` : `Released ${plural(-n, "truck")}.`);
         state.refresh();
       } catch (err) { toast("Couldn't save: " + err.message, true); b.disabled = false; }
     });
   }
 
-  // The one button for a week, if there is one: ask for the gap early, or release trucks no one needs.
+  // The one button for a week, if there is one: pre-book the open trucks, or release trucks no one needs.
   function action(items, row, w) {
-    if (state.dept !== "logistics") return "";
-    const said = carrierSaid(items, row.lane, w.week);
+    if (state.dept !== "logistics" || !w.canBook) return "";
     const data = `data-customer="${esc(row.customer)}" data-week="${w.week}"`;
-    if (w.gap && w.canAsk && said.canAsk) return `<button type="button" class="util on small" data-olask="${w.gap}" ${data}>Ask +${w.gap}</button>`;
-    if (!w.gap && w.surplus && w.latest < w.base && w.canRelease) return `<button type="button" class="util small" data-olrelease="${w.surplus}" ${data}>Release ${w.surplus}</button>`;
+    if (w.gap) return `<button type="button" class="util on small" data-olbook="${w.gap}" ${data}>Book +${w.gap}</button>`;
+    if (w.surplus && w.latest < w.base) return `<button type="button" class="util small" data-olrelease="${w.surplus}" ${data}>Release ${w.surplus}</button>`;
     return "";
   }
   const status = (w) => w.gap ? `<span class="ol-gap">${w.gap} open</span>`
@@ -400,7 +391,7 @@ function outlookView(store, state) {
       const [customer, wk] = pick.split("@");
       const row = rows.find((r) => r.customer === customer);
       const w = row.weeks[+wk];
-      const said = carrierSaid(items, row.lane, w.week);
+      const said = preSaid(items, row.lane, w.week);
       return `<button type="button" class="linkish back" id="side-back">${icon("left")}To act on</button>
         <h2>${esc(custName(customer))}</h2><p class="side-lane">${esc(weekLabel(w.week))}</p>
         <p class="big-label">Forecast</p>
@@ -409,19 +400,20 @@ function outlookView(store, state) {
         <p class="big-label">Orders</p>
         <ul class="moves"><li><span>Accepted</span><strong>${w.ordered}</strong></li>${w.pending ? `<li><span>Checking</span><strong>${w.pending}</strong></li>` : ""}<li><span>Forecast left</span><strong>${w.left}</strong></li></ul>
         <p class="big-label">Trucks</p>
-        <ul class="moves"><li><span>Needed</span><strong>${w.need}</strong></li><li><span>Contract</span><strong>${w.base}${w.extra ? ` ${w.extra > 0 ? "+" : "−"} ${Math.abs(w.extra)}` : ""}</strong></li>
+        <ul class="moves"><li><span>Needed</span><strong>${w.need}</strong></li><li><span>Scheduled</span><strong>${w.base}${w.extra ? ` ${w.extra > 0 ? "+" : "−"} ${Math.abs(w.extra)}` : ""}</strong></li>
+          ${w.ahead ? `<li><span>Orders booked ahead</span><strong>${w.ahead}</strong></li>` : ""}
           <li><span>${!w.gap && w.surplus ? "Extra" : "Open"}</span><strong class="${w.gap ? "t-spot" : ""}">${w.gap || w.surplus}</strong></li></ul>
-        ${w.gap && !w.canAsk ? `<p class="why">Under ${RULES.carrierFlexNoticeDays} days: ${plural(w.gap, "spot truck")}</p>` : ""}
+        ${w.gap && !w.canBook ? `<p class="why">Under ${RULES.noticeDays} days: late orders go spot</p>` : ""}
         ${action(items, row, w).replace("small", "wide")}
-        ${said.text ? `<p class="said">${esc(said.text)}</p>` : ""}`;
+        ${said ? `<p class="said">${esc(said)}</p>` : ""}`;
     }
     const list = E.warnings(items, NOW);
     if (!list.length) return `<h2>To act on</h2><p class="empty">Nothing. Every week is covered.</p>`;
     return `<h2>To act on</h2><ul class="tobook">${list.map((x) => {
       const row = rows.find((r) => r.customer === x.customer);
-      const by = x.kind === "up" ? x.askBy : x.releaseBy;
+      const by = x.bookBy;
       return `<li class="tb-row"><button type="button" class="row" data-ol="${esc(x.customer)}@${x.wk}">
-          <span class="row-top"><strong>${esc(custName(x.customer))}</strong>${x.kind === "up" && !x.canAsk ? `<span class="by by-soon">spot</span>` : `<span class="by${E.daysBetween(NOW, by) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(by))}</span>`}</span>
+          <span class="row-top"><strong>${esc(custName(x.customer))}</strong>${!x.canBook ? `<span class="by by-soon">spot risk</span>` : `<span class="by${E.daysBetween(NOW, by) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(by))}</span>`}</span>
           <span class="row-sub">${esc(weekLabel(x.week))}</span>
           <span class="row-sub">${x.kind === "up" ? `<span class="t-spot">${x.n} open</span>` : `<span class="t-chk">${x.n} extra</span>`}</span></button>
         ${action(items, row, x)}</li>`;
@@ -463,19 +455,6 @@ function ordersView(store, state) {
       if (f) { filter = f.dataset.filter; return live(state.items); }
       const pick = e.target.closest("[data-pick]");
       if (pick) { selected = pinned = pick.dataset.pick; history.replaceState(null, "", "#" + selected); return live(state.items); }
-      const ask = e.target.closest("button[data-ask]");
-      if (ask) {
-        ask.disabled = true;
-        try {
-          const it = byId(state.items, ask.dataset.id);
-          const lane = E.itemLane(it), n = +ask.dataset.ask;
-          const ans = E.carrierAnswer(state.items, lane, it.data.date, n, NOW);
-          await store.add({ type: "ask", status: ans.status, data: { kind: lane.kind, destination: lane.destination, week: E.weekKey(it.data.date), date: it.data.date, trucks: n, accepted: ans.accepted } });
-          toast(`Carrier: ${ans.why}`, ans.status === "no");
-          state.refresh();
-        } catch (err) { toast("Couldn't ask: " + err.message, true); ask.disabled = false; }
-        return;
-      }
       const b = e.target.closest("button[data-decide]");
       if (!b) return;
       b.disabled = true;
@@ -510,15 +489,11 @@ function ordersView(store, state) {
     const card = (t) => {
       const s = it.data.signoffs?.[t];
       const mine = state.dept === t;
-      const said = t === "logistics" ? carrierSaid(items, E.itemLane(it), it.data.date) : null;
-      const canAsk = t === "logistics" && c.alloc?.fixable > 0 && E.daysBetween(NOW, it.data.date) >= RULES.carrierFlexNoticeDays && said.canAsk;
       return `<div class="dcard ${s ? (s.ok ? "d-yes" : "d-no") : ""}${mine ? " d-mine" : ""}">
         <p class="d-name">${DEPT[t]}</p>
         <p class="d-check ${c[t].ok ? "ok" : "bad"}">${icon(c[t].ok ? "check" : "x")}${esc(c[t].verdict)}</p>
-        ${said?.text ? `<p class="said">${esc(said.text)}</p>` : ""}
-        ${canAsk && mine && canAnswer && !s ? `<button type="button" class="util on ask" data-ask="${c.alloc.fixable}" data-id="${esc(it.id)}">Ask carrier +${c.alloc.fixable}</button>` : ""}
         ${mine && canAnswer ? `<div class="d-btns"><button type="button" class="util${s?.ok === true ? " on" : !s && c[t].ok ? " rec" : ""}" data-decide="${t}" data-ok="1" data-id="${esc(it.id)}">Accept</button>
-            <button type="button" class="util${s?.ok === false ? " on-no" : !s && !c[t].ok && !canAsk ? " rec-no" : ""}" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
+            <button type="button" class="util${s?.ok === false ? " on-no" : !s && !c[t].ok ? " rec-no" : ""}" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
           : `<p class="d-status">${s ? (s.ok ? "Accepted" : "Denied") : "Waiting"}</p>`}
       </div>`;
     };
@@ -574,16 +549,7 @@ function calendarView(store, state) {
         return live(state.items);
       }
       if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
-      const sp = e.target.closest("button[data-spread]");
-      if (sp) {
-        if (state.dept !== "logistics") return toast("Switch to Logistics.", true);
-        const it = byId(await store.list(), sp.dataset.spread);
-        await store.update(it.id, { data: { ...it.data, pattern: sp.dataset.pattern } });
-        toast(`Spread out: ${PATTERNS[sp.dataset.pattern].label.toLowerCase()}.`);
-        pick = null;
-        return state.refresh();
-      }
-      const b = e.target.closest("button[data-book], button[data-ask], button[data-bookall], button[data-bookitem]");
+      const b = e.target.closest("button[data-book], button[data-bookall], button[data-bookitem]");
       if (!b) return;
       if (state.dept !== "logistics") return toast("Switch to Logistics to book.", true);
       b.disabled = true;
@@ -592,7 +558,7 @@ function calendarView(store, state) {
           // Book every unbooked truck day of one order or transfer, or of all of them.
           const fresh = await store.list();
           const rows = E.toBookItems(fresh, NOW).filter((x) => b.dataset.bookall || String(x.it.id) === b.dataset.bookitem);
-          const at = nowIso();
+          const at = stamp();
           for (const x of rows) {
             const it = byId(fresh, x.it.id);
             await store.update(it.id, { data: { ...it.data, booked: { ...(it.data.booked || {}), ...Object.fromEntries(x.days.map((d) => [d.day, at])) } } });
@@ -602,21 +568,16 @@ function calendarView(store, state) {
         }
         const [key, day] = b.dataset.cellkey.split("@");
         const lane = PILOT_LANES.find((l) => l.key === key);
-        if (b.dataset.book) {
+        {
           // Book every accepted truck on this lane and day.
           const fresh = await store.list();
           const row = E.calendar(fresh, NOW, E.weekIndex(day, NOW)).find((r) => r.lane.key === key);
           const c = row.cells.find((x) => x.day === day);
           for (const m of c.moves.filter((x) => !x.checking && !x.booked)) {
             const it = byId(fresh, m.it.id);
-            await store.update(it.id, { data: { ...it.data, booked: { ...(it.data.booked || {}), [day]: nowIso() } } });
+            await store.update(it.id, { data: { ...it.data, booked: { ...(it.data.booked || {}), [day]: stamp() } } });
           }
           toast(`Booked: ${fmtDate(day)}, ${lane.destination}.`);
-        } else {
-          const n = +b.dataset.ask;
-          const ans = E.carrierAnswer(state.items, lane, day, n, NOW);
-          await store.add({ type: "ask", status: ans.status, data: { kind: lane.kind, destination: lane.destination, week: E.weekKey(day), date: day, trucks: n, accepted: ans.accepted } });
-          toast(`Carrier: ${ans.why}`, ans.status === "no");
         }
         state.refresh();
       } catch (err) { toast("Couldn't save: " + err.message, true); }
@@ -632,22 +593,11 @@ function calendarView(store, state) {
       const row = rows.find((r) => r.lane.key === key);
       const c = row?.cells.find((x) => x.day === day);
       if (c) {
-        const said = carrierSaid(items, row.lane, day);
-        const canAsk = c.fixable > 0 && E.daysBetween(NOW, day) >= RULES.carrierFlexNoticeDays && said.canAsk;
         return `<button type="button" class="linkish back" id="side-back">${icon("left")}To book</button>
           <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.kind === "order" ? `${custName(row.lane.destination)} · ${row.lane.destination}` : row.lane.destination)}${c.toBook ? ` · book by ${esc(fmtShort(E.addDays(day, -RULES.noticeDays)))}` : ""}</p>
           <ul class="moves">${c.moves.map((m) => `<li><span>${m.it.type === "order" ? `${E.poNumber(items, m.it)} · ${esc(custName(m.it.data.customer))}` : "Transfer"}</span>
             <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}${m.booked ? ` ${icon("check")}` : ""}</span></li>`).join("") || `<li class="empty">Nothing moving.</li>`}</ul>
           ${isLog && c.toBook ? `<button type="button" class="cta" data-book="1" data-cellkey="${esc(pick)}">Book ${plural(c.toBook, "truck")}</button>` : ""}
-          ${isLog ? c.moves.filter((m) => m.it.type === "transfer" && m.spot && !m.booked).map((m) => {
-            // A transfer with spot trucks: try spreading it out; offer the pattern with the fewest spot trucks.
-            const now = E.allocate(items, NOW).get(m.it.id).spot;
-            const best = Object.keys(PATTERNS).map((k) => ({ k, spot: E.allocate(items.map((x) => (x.id === m.it.id ? { ...x, data: { ...x.data, pattern: k } } : x)), NOW).get(m.it.id).spot }))
-              .reduce((a, b) => (b.spot < a.spot ? b : a));
-            return best.spot < now ? `<button type="button" class="util on wide" data-spread="${esc(m.it.id)}" data-pattern="${best.k}">${PATTERNS[best.k].label}: ${best.spot} spot</button>` : "";
-          }).join("") : ""}
-          ${isLog && canAsk ? `<button type="button" class="util wide" data-ask="${c.fixable}" data-cellkey="${esc(pick)}">Ask carrier for +${c.fixable}</button>` : ""}
-          ${said.text ? `<p class="said">${esc(said.text)}</p>` : ""}
           ${!isLog && c.toBook ? `<p class="small">Logistics books this.</p>` : ""}`;
       }
     }
@@ -680,9 +630,9 @@ function calendarView(store, state) {
           const key = `${r.lane.key}@${c.day}`;
           const cls = [c.spot ? "c-spot" : c.toBook ? "c-book" : "", c.day < NOW ? "c-past" : "", pick === key ? "c-pick" : ""].join(" ");
           return `<td class="${cls}"><button type="button" class="cell" data-cell="${esc(key)}" aria-label="${esc(r.lane.destination)} ${esc(fmtDate(c.day))}">${squares(c.moves)}</button></td>`;
-        }).join("")}<td class="open${r.open ? "" : " open-0"}" title="Contract trucks still free this week">${r.open}</td></tr>`).join("");
+        }).join("")}</tr>`).join("");
     $("#cal").innerHTML = `<div class="table-wrap"><table class="cal">
-      <thead><tr><th></th>${days.map((d) => `<th class="${d === NOW ? "today" : ""}">${esc(dow(d))} <span>${E.atNoon(d).getDate()}</span></th>`).join("")}<th class="open-h">Open</th></tr></thead>
+      <thead><tr><th></th>${days.map((d) => `<th class="${d === NOW ? "today" : ""}">${esc(dow(d))} <span>${E.atNoon(d).getDate()}</span></th>`).join("")}</tr></thead>
       <tbody>${group("order", "Customers")}${group("transfer", "Warehouses")}</tbody></table></div>`;
     $("#cal-side").innerHTML = side(items, rows);
   }
@@ -694,42 +644,40 @@ function calendarView(store, state) {
 function transfersView(store, state) {
   const lanes = PILOT_LANES.filter((l) => l.kind === "transfer");
   const nextMon = E.addDays(E.weekKey(NOW), 8);
-  const form = { destination: "Mississauga, ON", trucks: 12, date: E.daysBetween(NOW, nextMon) >= RULES.noticeDays ? nextMon : E.addDays(nextMon, 7), pattern: "w3" };
+  const form = { destination: "Mississauga, ON", trucks: 12, date: E.daysBetween(NOW, nextMon) >= RULES.noticeDays ? nextMon : E.addDays(nextMon, 7) };
   const html = `<div class="cols cols-plan">
     <section class="panel">
       <h1>Plan a transfer</h1>
       <div class="row3">
-        <label class="field"><span class="label">To</span><select id="p-dest">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select></label>
+        <label class="field"><span class="label">To</span><select id="p-dest" aria-label="To">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select></label>
         <label class="field"><span class="label">Truckloads</span><input id="p-trucks" type="number" min="1" max="200" inputmode="numeric"></label>
-        <label class="field"><span class="label">Start</span><input id="p-date" type="date" min="${E.addDays(NOW, RULES.noticeDays)}" max="${LAST_DAY}"></label>
+        <label class="field"><span class="label">Ship on</span><input id="p-date" type="date" min="${NOW}" max="${LAST_DAY}"></label>
       </div>
-      <div id="p-options" class="options" role="radiogroup" aria-label="How it ships"></div>
+      <div id="p-result" class="p-result"></div>
       <button type="button" id="p-send" class="cta">Put on calendar</button>
     </section>
     <section class="panel"><h2>Planned</h2><div id="p-list"></div></section>
   </div>`;
 
-  const draft = (pattern) => ({ id: "draft", type: "transfer", status: "booked", created_at: "￿",
-    data: { destination: form.destination, trucks: form.trucks, date: form.date, pattern } });
+  const draft = () => ({ id: "draft", type: "transfer", status: "booked", created_at: "￿",
+    data: { destination: form.destination, trucks: form.trucks, date: form.date } });
 
+  // What this transfer costs in spot: none if booked 3+ days ahead.
   function paint() {
     $("#p-dest").value = form.destination;
     $("#p-trucks").value = form.trucks;
     $("#p-date").value = form.date;
-    const opts = Object.entries(PATTERNS).map(([key, p]) => ({ key, p, a: E.allocate([...state.items, draft(key)], NOW).get("draft") }));
-    const best = opts.reduce((m, o) => (o.a.spot < m.a.spot ? o : m), opts[0]);
-    $("#p-options").innerHTML = opts.map(({ key, p, a }) => `<button type="button" role="radio" aria-checked="${key === form.pattern}" class="option${key === form.pattern ? " on" : ""}" data-pattern="${key}">
-        <span class="op-name">${p.label}${key === best.key ? ` <span class="best">Best</span>` : ""}</span>
-        <span class="op-sq">${squares([{ contract: a.contract, spot: a.spot, booked: true }], 30)}</span>
-        <span class="op-n"><span class="t-con">${a.contract} contract</span>${a.spot ? ` <span class="t-spot">${a.spot} spot · ${money(a.overspend)}</span>` : ""}</span>
-      </button>`).join("");
+    const a = E.allocate([...state.items, draft()], NOW).get("draft");
+    const bookBy = E.addDays(form.date, -RULES.noticeDays);
+    $("#p-result").innerHTML = `<span class="op-sq">${squares([{ contract: a.contract, spot: a.spot, booked: false }], 40)}</span>
+      <span class="op-n"><span class="t-con">${a.contract} contract</span>${a.spot ? ` <span class="t-spot">${a.spot} spot · ${money(a.overspend)}</span>` : ""}</span>
+      <span class="p-by">${a.spot ? `Under ${RULES.noticeDays} days` : `Book by ${esc(fmtDate(bookBy))}`}</span>`;
   }
 
   function mount() {
     $("#p-dest").addEventListener("change", (e) => { form.destination = e.target.value; paint(); });
     $("#p-trucks").addEventListener("input", (e) => { form.trucks = Math.min(200, Math.max(1, +e.target.value || 1)); paint(); });
     $("#p-date").addEventListener("change", (e) => { form.date = e.target.value; paint(); });
-    $("#p-options").addEventListener("click", (e) => { const o = e.target.closest("[data-pattern]"); if (o) { form.pattern = o.dataset.pattern; paint(); } });
     $("#p-list").addEventListener("click", async (e) => {
       const r = e.target.closest("[data-remove]");
       if (!r) return;
@@ -741,10 +689,10 @@ function transfersView(store, state) {
     $("#p-send").addEventListener("click", async (e) => {
       const b = e.target;
       if (state.dept !== "logistics") return toast("Switch to Logistics to plan transfers.", true);
-      if (E.daysBetween(NOW, form.date) < RULES.noticeDays) return toast(`Start ${RULES.noticeDays}+ days out.`, true);
+      if (form.date < NOW || form.date > LAST_DAY) return toast("Pick a date in the next 6 weeks.", true);
       b.disabled = true;
       try {
-        await store.add({ type: "transfer", status: "booked", data: { ...draft(form.pattern).data } });
+        await store.add({ type: "transfer", status: "booked", data: { ...draft().data } });
         toast(`On the calendar: ${form.trucks} to ${form.destination}.`);
         state.refresh();
       } catch (err) { toast("Couldn't save: " + err.message, true); }
@@ -760,7 +708,7 @@ function transfersView(store, state) {
     $("#p-list").innerHTML = list.length ? `<ul class="plain">${list.map((it) => {
       const a = alloc.get(it.id);
       const booked = it.data.booked && Object.keys(it.data.booked).length;
-      return `<li><span><strong>${esc(it.data.destination)}</strong> · ${it.data.trucks} · ${esc(PATTERNS[it.data.pattern].label.toLowerCase())} from ${esc(fmtShort(it.data.date))}</span>
+      return `<li><span><strong>${esc(it.data.destination)}</strong> · ${it.data.trucks} · ${esc(fmtShort(it.data.date))}</span>
         <span><span class="t-con">${a.contract} contract</span>${a.spot ? ` <span class="t-spot">${a.spot} spot</span>` : ""}
         ${booked ? "" : `<button type="button" class="linkish inline" data-remove="${esc(it.id)}">Remove</button>`}</span></li>`;
     }).join("")}</ul>` : `<p class="empty">None yet.</p>`;
@@ -802,7 +750,7 @@ function execView(store, state) {
       <div class="big-card wide"><p class="big-label">Spot share</p>${bar("Old way", old, "bad")}${bar("Now", now, now.spotShare <= RULES.spotGoal ? "good" : "bad")}
         <p class="big-sub">Goal ${pct(RULES.spotGoal)} · 2026 so far ${pct(RULES.spotToday)}</p></div>`;
     const by = E.savingsBy(items, NOW);
-    const parts = [["Check-off", by.checkoff], ["Transfer waves", by.transfers], ["Carrier asks", by.carrier]];
+    const parts = [["Check-off", by.checkoff], ["Booked ahead", by.bookAhead], ["Transfers ahead", by.transfers], ["Early warning", by.warning]].filter(([, v]) => v > 0);
     const top = Math.max(1, ...parts.map(([, v]) => v));
     $("#x-from").innerHTML = saved ? `<p class="big-label">Where it came from</p>${parts.map(([n, v]) => `<div class="from-row"><span>${n}</span>
         <span class="from-bar"><i style="width:${(v / top) * 100}%"></i></span><span class="from-n">${money(v)}</span></div>`).join("")}` : "";
@@ -884,8 +832,18 @@ async function main() {
   drawNav();
   const notes = [];
   if (!store.live) notes.push(FORCE_LOCAL ? "Backup mode: this laptop only" : "Local mode");
-  if (PARAMS.get("today")) notes.push(`Today: ${fmtDate(NOW)}`);
-  if (notes.length) { $("#mode-banner").hidden = false; $("#mode-banner").textContent = notes.join(" · "); }
+  if (notes.length || PARAMS.get("today")) {
+    // Rehearsal: pick the app's "today" to show what happens days later (a late order, a missed book-by date).
+    $("#mode-banner").hidden = false;
+    $("#mode-banner").innerHTML = esc(notes.join(" · ")) + (PARAMS.get("today")
+      ? `${notes.length ? " · " : ""}<label class="today">Today <input type="date" id="today-pick" value="${NOW}" aria-label="Today"></label>` : "");
+    $("#today-pick")?.addEventListener("change", (e) => {
+      if (!e.target.value) return;
+      const q = new URLSearchParams(location.search);
+      q.set("today", e.target.value);
+      location.search = q.toString().replace(/local=(&|$)/, "local$1");
+    });
+  }
   document.title = portal === "customer" ? `${CUST_TABS[custTab]} · Customer HQ` : portal === "ball" ? `${BALL[role]} · Ball HQ` : "Ball · Findlay pilot";
 
   const view = portal === "home" ? homeView()

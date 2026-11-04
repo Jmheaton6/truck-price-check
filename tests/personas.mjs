@@ -85,12 +85,12 @@ async function fill(label, value) {
   const loc = page.getByLabel(label, { exact: false }).first();
   if (!(await loc.count())) { issue(`No field labeled "${label}".`); throw new Error(`no field ${label}`); }
   await loc.fill(String(value));
-  await loc.dispatchEvent(label.match(/deliver|start/i) ? "change" : "input");
+  await loc.dispatchEvent(label.match(/deliver|start|ship on/i) ? "change" : "input");
   step(`Typed ${value} in "${label}"`);
   await pause(200);
 }
 async function pick(label, value) {
-  await page.getByLabel(label).first().selectOption({ label: value });
+  await page.getByLabel(label, { exact: true }).first().selectOption({ label: value });
   P.clicks++;
   step(`Picked "${value}" in "${label}"`);
   await pause();
@@ -163,8 +163,8 @@ await task(async () => {
   await click("Transfers", { role: "link" });
   await look("transfers");
   await fill("Truckloads", 12);
-  await click("Over 3 weeks");
-  await sees("12 contract", "the best option keeps all 12 on contract");
+  await sees("12 contract", "all 12 on contract when planned ahead");
+  await sees("Book by", "when I have to book them");
   await click("Put on calendar");
   await look("transfer planned");
 });
@@ -242,18 +242,12 @@ for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production"
     await click(bad ? "Deny" : "Accept", { exact: true });
   });
 }
-persona("Lee (Logistics)", "logistics4", "This order would need a spot truck. Avoid spot before I accept.");
+persona("Lee (Logistics)", "logistics4", "Accept the new order; it's 3+ weeks out, so it should all be contract.");
 await task(async () => {
   await go("?role=orders" + Q);
   await iAm("Logistics");
-  await look("order needing spot");
-  await sees("spot", "that a truck would go spot");
-  const ask = page.getByRole("button", { name: /^Ask carrier/ });
-  if (!(await ask.count())) { issue("Order would go spot, but no way to ask the carrier from here."); throw new Error("no ask"); }
-  await click((await ask.first().textContent()).trim());
-  if (!/yes/i.test(await toastText())) issue("Carrier didn't say yes with 20 days' notice.");
-  await look("after asking carrier");
-  if (await page.locator(".d-mine .d-check.bad").count()) issue("Still shows spot after the carrier said yes.");
+  await look("order 3 weeks out");
+  if (await page.locator(".d-mine .d-check.bad").count()) issue("An order 20 days out shows spot trucks.");
   await click("Accept", { exact: true });
 });
 
@@ -273,10 +267,10 @@ await task(async () => {
   await iAm("Logistics");
   await look("outlook with warning");
   await sees("6 open", "how many trucks aren't covered");
-  const ask = page.getByRole("button", { name: /^Ask \+/ });
-  if (!(await ask.count())) { issue("Warning shows, but no way to ask the carrier."); throw new Error("no ask"); }
-  await click((await ask.first().textContent()).trim());
-  if (!/yes/i.test(await toastText())) issue("Carrier didn't say yes with 24 days' notice.");
+  const book = page.getByRole("button", { name: /^Book \+/ });
+  if (!(await book.count())) { issue("Warning shows, but no way to book the trucks ahead."); throw new Error("no book"); }
+  await click((await book.first().textContent()).trim());
+  if (!/pre-booked/i.test(await toastText())) issue("No confirmation after pre-booking.");
   await look("outlook covered");
   await sees("Covered", "the week is covered now");
 });
@@ -365,27 +359,18 @@ for (const dept of ["Sales", "Inventory", "Production", "Logistics"]) {
     await click(bad ? "Deny" : "Accept", { exact: true });
   });
 }
-persona("Lee (Logistics)", "edge-transfer", "Ship 8 to Mississauga all on Fri Nov 20, see the spot, and fix it from the calendar.");
+persona("Lee (Logistics)", "edge-transfer", "A warehouse wants 8 truckloads to Mississauga this Saturday. See the cost, then move it to Monday.");
 await task(async () => {
   await go("?role=transfers" + Q);
   await iAm("Logistics");
   await pick("To", "Mississauga, ON");
   await fill("Truckloads", 8);
-  await fill("Start", "2026-11-20");
-  await click("All on one day");
+  await fill("Ship on", "2026-11-07");
+  await look("transfer in 2 days");
+  await sees("spot", "that 2 days out means spot");
+  await fill("Ship on", "2026-11-09");
+  await sees("8 contract", "all contract at 4 days out");
   await click("Put on calendar");
-  await click("Trucks", { role: "link" });
-  await look("calendar with spot");
-  await click("Mississauga by", { exact: false, scrollOk: true });   // its row in "To book"
-  await look("spot day");
-  const spread = page.getByRole("button", { name: /^Over \d weeks?: / });
-  if (!(await spread.count())) issue("Transfer has spot, but no way to spread it out from the calendar.");
-  else { await click((await spread.first().textContent()).trim()); await look("after spreading"); }
-  const row = page.getByRole("button", { name: /^Mississauga by .* Transfer · Nov 20/ });
-  if (await row.count()) { await row.first().click(); P.clicks++; await pause(); }
-  const ask = page.getByRole("button", { name: /^Ask carrier/ });
-  if (await ask.count()) { await click((await ask.first().textContent()).trim()); step(`Carrier said: ${await toastText()}`); }
-  await look("after ask");
 });
 persona("Lee (Logistics)", "edge-remove", "Changed my mind: remove the Adairsville transfer.");
 await task(async () => {
