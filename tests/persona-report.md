@@ -1,11 +1,12 @@
 # Persona test report
 
-Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 11:55:03 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
 | Pat (customer, Coca-Cola buyer) | Our Nov 29 week has a promo: tell Ball it'll be 1.4 million cans. | yes | 2 | 0 |
 | Pia (Planning, short-term forecasting) | See what's coming, and send Logistics a prebuild: 12 truckloads to the Findlay warehouse, ready Nov 9. | yes | 4 | 0 |
+| Lee (Logistics) | Coca-Cola's promo week needs more trucks than our carriers hold. Line them up now. | yes | 3 | 0 |
 | Lee (Logistics) | Schedule the prebuild so it doesn't go spot. | yes | 3 | 0 |
 | Pat (customer, Coca-Cola buyer) | Order 0.6 million cans for Thu Nov 19, then see where it stands. | yes | 2 | 0 |
 | Sam (Sales) | Find the new order, read my check, answer it. | yes | 2 | 0 |
@@ -41,8 +42,8 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Share forecast"
 
 **Screens:**
-- home: 29 words, longest line 10 words, main button none · `01-forecast-home.png`
-- customer start: 54 words, longest line 3 words, main button visible · `02-forecast-customer-start.png`
+- home: 31 words, longest line 10 words, main button none · `01-forecast-home.png`
+- customer start: 56 words, longest line 3 words, main button visible · `02-forecast-customer-start.png`
 
 ## Pia (Planning, short-term forecasting)
 *See what's coming, and send Logistics a prebuild: 12 truckloads to the Findlay warehouse, ready Nov 9.*
@@ -57,7 +58,20 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Send to Logistics"
 
 **Screens:**
-- short-term forecast: 93 words, longest line 3 words, main button visible · `03-planning-short-term-forecast.png`
+- short-term forecast: 119 words, longest line 6 words, main button visible · `03-planning-short-term-forecast.png`
+
+## Lee (Logistics)
+*Coca-Cola's promo week needs more trucks than our carriers hold. Line them up now.*
+
+**What I did:**
+- Opened the Logistics hub
+- Clicked "Lanes"
+- Saw "Early warning"
+- Saw the promo week's trucks vs the room
+- Clicked "Add 2"
+
+**Screens:**
+- early warning: 72 words, longest line 11 words, main button none · `04-warning-early-warning.png`
 
 ## Lee (Logistics)
 *Schedule the prebuild so it doesn't go spot.*
@@ -71,7 +85,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Schedule"
 
 **Screens:**
-- prebuild to schedule: 46 words, longest line 3 words, main button visible · `04-transfers-prebuild-to-schedule.png`
+- prebuild to schedule: 48 words, longest line 3 words, main button visible · `05-transfers-prebuild-to-schedule.png`
 
 ## Pat (customer, Coca-Cola buyer)
 *Order 0.6 million cans for Thu Nov 19, then see where it stands.*
@@ -86,7 +100,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Saw the order status
 
 **Screens:**
-- order sent: 41 words, longest line 2 words, main button none · `05-customer-order-sent.png`
+- order sent: 43 words, longest line 2 words, main button none · `06-customer-order-sent.png`
 
 ## Sam (Sales)
 *Find the new order, read my check, answer it.*
@@ -97,7 +111,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Accept"
 
 **Screens:**
-- Sales check: 58 words, longest line 9 words, main button none · `06-sales-sales-check.png`
+- Sales check: 60 words, longest line 9 words, main button none · `07-sales-sales-check.png`
 
 ## Ivy (Inventory)
 *Find the new order, read my check, answer it.*
@@ -107,7 +121,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Accept"
 
 **Screens:**
-- Inventory check: 58 words, longest line 9 words, main button none · `07-inventory-inventory-check.png`
+- Inventory check: 60 words, longest line 9 words, main button none · `08-inventory-inventory-check.png`
 
 ## Pia (Planning)
 *Find the new order, read my check, answer it.*
@@ -117,7 +131,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Accept"
 
 **Screens:**
-- Planning check: 61 words, longest line 9 words, main button none · `08-planning-planning-check.png`
+- Planning check: 63 words, longest line 9 words, main button none · `09-planning-planning-check.png`
 
 ## Lee (Logistics)
 *Find the new order, read my check, answer it.*
@@ -128,7 +142,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Accept"
 
 **Screens:**
-- Logistics check: 59 words, longest line 9 words, main button none · `09-logistics-logistics-check.png`
+- Logistics check: 61 words, longest line 9 words, main button none · `10-logistics-logistics-check.png`
 
 ## Lee (Logistics)
 *Book the accepted order's trucks.*
@@ -139,7 +153,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Book"
 
 **Screens:**
-- lanes: 57 words, longest line 12 words, main button none · `10-book-lanes.png`
+- lanes: 63 words, longest line 11 words, main button none · `11-book-lanes.png`
 
 ## Pat (customer, Coca-Cola buyer)
 *The promo grew: change the Nov 19 order to 1 million cans.*
@@ -181,7 +195,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Counteroffer Nov 20"
 
 **Screens:**
-- no carrier has room: 63 words, longest line 9 words, main button visible · `11-counter-no-carrier-has-room.png`
+- no carrier has room: 65 words, longest line 9 words, main button visible · `12-counter-no-carrier-has-room.png`
 
 ## Pat (customer, Coca-Cola buyer)
 *Ball offered a new date. Take it.*
@@ -193,7 +207,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Saw the change accepted
 
 **Screens:**
-- counteroffer: 59 words, longest line 14 words, main button visible · `12-take-counteroffer.png`
+- counteroffer: 61 words, longest line 14 words, main button visible · `13-take-counteroffer.png`
 
 ## Cy (customer, AB InBev buyer)
 *Order 0.4 million cans for Wed Nov 18 and keep that date even if it costs more.*
@@ -233,7 +247,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Clicked "Offer spot to customer"
 
 **Screens:**
-- one-carrier lane: 69 words, longest line 10 words, main button visible · `13-edge-spot-one-carrier-lane.png`
+- one-carrier lane: 71 words, longest line 10 words, main button visible · `14-edge-spot-one-carrier-lane.png`
 
 ## Cy (customer, AB InBev buyer)
 *Keep my date and pay the fee.*
@@ -244,7 +258,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Saw the fee on my PO
 
 **Screens:**
-- kept date: 49 words, longest line 3 words, main button none · `14-edge-keep2-kept-date.png`
+- kept date: 51 words, longest line 3 words, main button none · `15-edge-keep2-kept-date.png`
 
 ## Bo (customer, PepsiCo buyer)
 *Rush: order 0.4 million cans for Sat Nov 7 (2 days out).*
@@ -268,7 +282,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Saw the order back in play
 
 **Screens:**
-- rush order: 60 words, longest line 9 words, main button none · `15-edge-sales-rush-order.png`
+- rush order: 62 words, longest line 9 words, main button none · `16-edge-sales-rush-order.png`
 
 ## Ivy (Inventory)
 *Check how many labeled cans each customer has left.*
@@ -279,7 +293,7 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Saw "Coca-Cola"
 
 **Screens:**
-- stock: 48 words, longest line 7 words, main button none · `16-edge-stock-stock.png`
+- stock: 50 words, longest line 7 words, main button none · `17-edge-stock-stock.png`
 
 ## Pia (Planning)
 *Check line time and the yearly baseline.*
@@ -291,8 +305,8 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Saw this year's plan
 
 **Screens:**
-- line time: 55 words, longest line 6 words, main button none · `17-edge-line-line-time.png`
-- long-term: 44 words, longest line 7 words, main button none · `18-edge-line-long-term.png`
+- line time: 57 words, longest line 6 words, main button none · `18-edge-line-line-time.png`
+- long-term: 46 words, longest line 7 words, main button none · `19-edge-line-long-term.png`
 
 ## Sam (Sales)
 *Try to book trucks even though I'm in Sales.*
@@ -314,14 +328,15 @@ Run: 11/4/2026, 11:05:31 AM · http://localhost:8765/ · backup mode, today = Th
 - Saved shows $5,949
 
 **Screens:**
-- executive: 80 words, longest line 10 words, main button none · `19-exec-executive.png`
+- executive: 79 words, longest line 10 words, main button none · `20-exec-executive.png`
 
 ## Final data
 | # | Type | Status | What | Date | Booked days |
 |---|---|---|---|---|---|
 | 1 | ask forecast | noted | Random Lake, WI 7 |  | 0 |
 | 2 | transfer | booked | Findlay, OH 12 |  | 4 |
-| 3 | order po | confirmed | Random Lake, WI 3 | 2026-11-19 | 1 |
-| 4 | order change | confirmed | Random Lake, WI 2 (of #3) | 2026-11-20 | 0 |
-| 5 | order po | confirmed | Memphis, TN 2 | 2026-11-18 | 0 |
-| 6 | order po | waiting | Alsip, IL 2 | 2026-11-07 | 0 |
+| 3 | ask room | noted |   |  | 0 |
+| 4 | order po | confirmed | Random Lake, WI 3 | 2026-11-19 | 1 |
+| 5 | order change | confirmed | Random Lake, WI 2 (of #4) | 2026-11-20 | 0 |
+| 6 | order po | confirmed | Memphis, TN 2 | 2026-11-18 | 0 |
+| 7 | order po | waiting | Alsip, IL 2 | 2026-11-07 | 0 |
