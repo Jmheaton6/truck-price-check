@@ -244,3 +244,6 @@ input:hover, select:hover { border-color: var(--muted); }
 .linkish.inline { margin: 0 0 0 10px; font-size: 13px; }
 .tb-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tb-row .row { margin: 0; flex: 1; }
+.d-btns + .ask, .ask { align-self: flex-start; }
+.dcard .ask { width: 100%; min-height: 38px; }
+.dcard .util.on.ask { background: var(--teal); border-color: var(--teal); }

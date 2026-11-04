@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 1:11:10 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -8,7 +8,7 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 | Sam (Sales) | Find the new order waiting on me, read my check, and answer it. | yes | 2 | 0 |
 | Ivy (Inventory) | Find the new order waiting on me, read my check, and answer it. | yes | 2 | 0 |
 | Paolo (Production) | Find the new order waiting on me, read my check, and answer it. | yes | 2 | 0 |
-| Lee (Logistics) | Accept the order, then book its trucks on the calendar, then plan 12 truckloads to Mississauga. | yes | 9 | 1 |
+| Lee (Logistics) | Accept the order, then book its trucks on the calendar, then plan 12 truckloads to Mississauga. | yes | 9 | 0 |
 | Pat (customer, Customer A buyer) | Promo got bigger: change the order to 2.8 million cans. | yes | 2 | 0 |
 | Sam (Sales) | A change came in. Read my check and answer honestly. | yes | 2 | 0 |
 | Paolo (Production) | A change came in. Read my check and answer honestly. | yes | 1 | 0 |
@@ -17,6 +17,11 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 | Ivy (Inventory) | Answer the customer's new date. | yes | 2 | 0 |
 | Paolo (Production) | Answer the customer's new date. | yes | 2 | 0 |
 | Lee (Logistics) | Answer the customer's new date. | yes | 2 | 0 |
+| Bo (customer, Customer B buyer) | Order 1.2 million cans for Wed Nov 25. | yes | 2 | 0 |
+| Sam (Sales) | Answer the new order. | yes | 2 | 0 |
+| Ivy (Inventory) | Answer the new order. | yes | 2 | 0 |
+| Paolo (Production) | Answer the new order. | yes | 2 | 0 |
+| Lee (Logistics) | This order would need a spot truck. Avoid spot before I accept. | yes | 3 | 0 |
 | Erin (Executive) | See how each department is doing and what we saved vs. the spot we're still paying for. | yes | 1 | 0 |
 
 ## Pat (customer, Customer A buyer)
@@ -45,7 +50,7 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 - Saw an empty queue after answering
 
 **Screens:**
-- Sales queue: 53 words, longest line 10 words, main button none · `04-sales-sales-queue.png`
+- Sales queue: 55 words, longest line 10 words, main button none · `04-sales-sales-queue.png`
 
 ## Ivy (Inventory)
 *Find the new order waiting on me, read my check, and answer it.*
@@ -57,7 +62,7 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 - Saw an empty queue after answering
 
 **Screens:**
-- Inventory queue: 53 words, longest line 10 words, main button none · `05-inventory-inventory-queue.png`
+- Inventory queue: 55 words, longest line 10 words, main button none · `05-inventory-inventory-queue.png`
 
 ## Paolo (Production)
 *Find the new order waiting on me, read my check, and answer it.*
@@ -69,13 +74,10 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 - Saw an empty queue after answering
 
 **Screens:**
-- Production queue: 53 words, longest line 10 words, main button none · `06-production-production-queue.png`
+- Production queue: 55 words, longest line 10 words, main button none · `06-production-production-queue.png`
 
 ## Lee (Logistics)
 *Accept the order, then book its trucks on the calendar, then plan 12 truckloads to Mississauga.*
-
-**Friction:**
-- Took 9 clicks.
 
 **What I did:**
 - Picked "Logistics" in "Department"
@@ -92,7 +94,7 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Book"
 
 **Screens:**
-- order accepted: 57 words, longest line 6 words, main button visible · `07-logistics-order-accepted.png`
+- order accepted: 59 words, longest line 6 words, main button visible · `07-logistics-order-accepted.png`
 - calendar: 68 words, longest line 10 words, main button none · `08-logistics-calendar.png`
 - transfers: 57 words, longest line 10 words, main button visible · `09-logistics-transfers.png`
 - transfer planned: 70 words, longest line 14 words, main button visible · `10-logistics-transfer-planned.png`
@@ -120,7 +122,7 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Deny"
 
 **Screens:**
-- Sales change: 58 words, longest line 10 words, main button none · `14-sales2-sales-change.png`
+- Sales change: 61 words, longest line 10 words, main button none · `14-sales2-sales-change.png`
 
 ## Paolo (Production)
 *A change came in. Read my check and answer honestly.*
@@ -171,6 +173,49 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 - Picked "Logistics" in "Department"
 - Clicked "Accept"
 
+## Bo (customer, Customer B buyer)
+*Order 1.2 million cans for Wed Nov 25.*
+
+**What I did:**
+- Picked "Customer B" in "Company"
+- Typed 1.2 in "Million cans"
+- Typed 2026-11-25 in "Deliver on"
+- Clicked "Send order"
+
+## Sam (Sales)
+*Answer the new order.*
+
+**What I did:**
+- Picked "Sales" in "Department"
+- Clicked "Accept"
+
+## Ivy (Inventory)
+*Answer the new order.*
+
+**What I did:**
+- Picked "Inventory" in "Department"
+- Clicked "Accept"
+
+## Paolo (Production)
+*Answer the new order.*
+
+**What I did:**
+- Picked "Production" in "Department"
+- Clicked "Accept"
+
+## Lee (Logistics)
+*This order would need a spot truck. Avoid spot before I accept.*
+
+**What I did:**
+- Picked "Logistics" in "Department"
+- Saw that a truck would go spot
+- Clicked "Ask carrier +1"
+- Clicked "Accept"
+
+**Screens:**
+- order needing spot: 59 words, longest line 10 words, main button visible · `18-logistics4-order-needing-spot.png`
+- after asking carrier: 58 words, longest line 10 words, main button none · `19-logistics4-after-asking-carrier.png`
+
 ## Erin (Executive)
 *See how each department is doing and what we saved vs. the spot we're still paying for.*
 
@@ -182,7 +227,7 @@ Run: 11/4/2026, 1:08:15 AM · http://localhost:8765/ · backup mode, today = Thu
 - Saw "Inventory"
 - Saw "Production"
 - Saw "Logistics"
-- Saved shows $8,697
+- Saved shows $9,334
 
 **Screens:**
-- executive: 58 words, longest line 7 words, main button none · `18-exec-executive.png`
+- executive: 58 words, longest line 7 words, main button none · `20-exec-executive.png`

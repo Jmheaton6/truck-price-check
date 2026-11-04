@@ -244,6 +244,19 @@ function ordersView(store, state) {
       if (f) { filter = f.dataset.filter; return live(state.items); }
       const pick = e.target.closest("[data-pick]");
       if (pick) { selected = pick.dataset.pick; history.replaceState(null, "", "#" + selected); return live(state.items); }
+      const ask = e.target.closest("button[data-ask]");
+      if (ask) {
+        ask.disabled = true;
+        try {
+          const it = byId(state.items, ask.dataset.id);
+          const lane = E.itemLane(it), n = +ask.dataset.ask;
+          const ans = E.carrierAnswer(state.items, lane, it.data.date, n, NOW);
+          await store.add({ type: "ask", status: ans.status, data: { kind: lane.kind, destination: lane.destination, week: E.weekKey(it.data.date), date: it.data.date, trucks: n, accepted: ans.accepted } });
+          toast(`Carrier: ${ans.why}`, ans.status === "no");
+          state.refresh();
+        } catch (err) { toast("Couldn't ask: " + err.message, true); ask.disabled = false; }
+        return;
+      }
       const b = e.target.closest("button[data-decide]");
       if (!b) return;
       b.disabled = true;
@@ -277,11 +290,14 @@ function ordersView(store, state) {
     const card = (t) => {
       const s = it.data.signoffs?.[t];
       const mine = state.dept === t;
+      const canAsk = t === "logistics" && c.alloc?.fixable > 0 && E.daysBetween(NOW, it.data.date) >= RULES.carrierFlexNoticeDays;
       return `<div class="dcard ${s ? (s.ok ? "d-yes" : "d-no") : ""}${mine ? " d-mine" : ""}">
         <p class="d-name">${DEPT[t]}</p>
         <p class="d-check ${c[t].ok ? "ok" : "bad"}">${icon(c[t].ok ? "check" : "x")}${esc(c[t].verdict)}</p>
+        ${t === "logistics" && mine && canAnswer && !s && c.alloc?.fixable > 0 && E.daysBetween(NOW, it.data.date) >= RULES.carrierFlexNoticeDays
+          ? `<button type="button" class="util on ask" data-ask="${c.alloc.fixable}" data-id="${esc(it.id)}">Ask carrier +${c.alloc.fixable}</button>` : ""}
         ${mine && canAnswer ? `<div class="d-btns"><button type="button" class="util${s?.ok === true ? " on" : !s && c[t].ok ? " rec" : ""}" data-decide="${t}" data-ok="1" data-id="${esc(it.id)}">Accept</button>
-            <button type="button" class="util${s?.ok === false ? " on-no" : !s && !c[t].ok ? " rec-no" : ""}" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
+            <button type="button" class="util${s?.ok === false ? " on-no" : !s && !c[t].ok && !canAsk ? " rec-no" : ""}" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
           : `<p class="d-status">${s ? (s.ok ? "Accepted" : "Denied") : "Waiting"}</p>`}
       </div>`;
     };

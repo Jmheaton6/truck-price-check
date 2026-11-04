@@ -239,23 +239,23 @@ export function checks(items, it, now) {
   const max = fc + Math.max(1, Math.round(fc * RULES.flexBand));
   const daysOut = daysBetween(now, dateOf(it));
   const sales = daysOut < RULES.noticeDays ? { ok: false, verdict: `Only ${daysOut} days out` }
-    : weekTotal > max ? { ok: false, verdict: `${weekTotal} vs. forecast ${fc}` }
-    : { ok: true, verdict: `${weekTotal} of forecast ${fc}` };
+    : weekTotal > max ? { ok: false, verdict: `Forecast ${fc}: ${weekTotal} is over` }
+    : { ok: true, verdict: `Forecast ${fc}: ${weekTotal} fits` };
 
   let inventory, production;
   if (cut) {
     inventory = p.frozen ? { ok: false, verdict: `${n} truckloads of cans stranded` } : { ok: true, verdict: "Nothing stranded" };
     production = { ok: true, verdict: `${n} fewer to make` };
   } else {
-    inventory = { ok: true, verdict: p.fromStock ? `${p.fromStock} from stock` : "None in stock" };
+    inventory = { ok: true, verdict: p.fromStock ? `${p.fromStock} from stock` : "All made new" };
     production = !p.toMake ? { ok: true, verdict: "Nothing to make" }
       : p.frozen ? { ok: false, verdict: "Inside the freeze" }
       : p.short ? { ok: false, verdict: `Short ${p.short} of line time` }
       : { ok: true, verdict: `${p.toMake} to make: fits` };
   }
   const logistics = cut ? { ok: true, verdict: `Frees ${n} trucks` }
-    : a.spot ? { ok: false, verdict: `${a.spot} spot of ${n}` }
-    : { ok: true, verdict: `${n} contract` };
+    : a.spot ? { ok: false, verdict: `${a.spot} of ${n} would be spot` }
+    : { ok: true, verdict: `All ${n} on contract` };
   return { sales, inventory, production, logistics, alloc: a, plan: p };
 }
 

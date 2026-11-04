@@ -164,6 +164,8 @@ await task(async () => {
   await sees("12 contract", "the best option keeps all 12 on contract");
   await click("Put on calendar");
   await look("transfer planned");
+});
+await task(async () => {
   await click("Trucks", { role: "link" });
   await look("calendar with transfer");
   const all = page.getByRole("button", { name: /^Book all/ });
@@ -217,6 +219,38 @@ for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production"
     await click(bad ? "Deny" : "Accept", { exact: true });
   });
 }
+
+persona("Bo (customer, Customer B buyer)", "customer4", "Order 1.2 million cans for Wed Nov 25.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await pick("Company", "Customer B");
+  await fill("Million cans", 1.2);
+  await fill("Deliver on", "2026-11-25");
+  await click("Send order");
+});
+for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production", "Paolo"]]) {
+  persona(`${who} (${dept})`, `${dept.toLowerCase()}4`, "Answer the new order.");
+  await task(async () => {
+    await go("?role=orders" + Q);
+    await iAm(dept);
+    const bad = await page.locator(".d-mine .d-check.bad").count();
+    await click(bad ? "Deny" : "Accept", { exact: true });
+  });
+}
+persona("Lee (Logistics)", "logistics4", "This order would need a spot truck. Avoid spot before I accept.");
+await task(async () => {
+  await go("?role=orders" + Q);
+  await iAm("Logistics");
+  await look("order needing spot");
+  await sees("spot", "that a truck would go spot");
+  const ask = page.getByRole("button", { name: /^Ask carrier/ });
+  if (!(await ask.count())) { issue("Order would go spot, but no way to ask the carrier from here."); throw new Error("no ask"); }
+  await click((await ask.first().textContent()).trim());
+  if (!/yes/i.test(await toastText())) issue("Carrier didn't say yes with 20 days' notice.");
+  await look("after asking carrier");
+  if (await page.locator(".d-mine .d-check.bad").count()) issue("Still shows spot after the carrier said yes.");
+  await click("Accept", { exact: true });
+});
 
 persona("Erin (Executive)", "exec", "See how each department is doing and what we saved vs. the spot we're still paying for.");
 await task(async () => {
