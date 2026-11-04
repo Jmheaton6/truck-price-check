@@ -146,13 +146,15 @@ export const overspend = (lane, spot) => spot * lane.spot_premium;
 // ---------- Who gets contract trucks ----------
 // Each truck on each day: contract if there's room that week (and, for transfers, that day) and it's booked
 // 3+ days ahead; otherwise spot. Booking is per day: data.booked = { "YYYY-MM-DD": timestamp }.
-// opts.oldWay: the same freight without the system: every order accepted as first asked (denied ones too),
-// no carrier asks, transfers all on one day.
+// opts.oldWay: the same freight without the system. It's three levers, which can also be set one at a time:
+//   oldOrders (every order accepted as first asked, denied ones too), noAsks (no carrier asks),
+//   oldTransfers (transfers all on one day).
+const leversOf = (opts) => (opts.oldWay ? { oldOrders: true, noAsks: true, oldTransfers: true } : opts);
+const orderCounts = (it, old) => (old ? !it.data.retry_of && it.status !== "waiting" : it.status !== "declined");
 export function allocate(items, now, opts = {}) {
-  const list = items.filter((it) => opts.oldWay
-    ? (it.type === "order" && !it.data.retry_of && it.status !== "waiting") || (it.type === "transfer" && isActive(it))
-    : shipsTrucks(it)).sort(byCreated);
-  const extras = opts.oldWay ? new Map() : carrierExtras(items, now);
+  const L = leversOf(opts);
+  const list = items.filter((it) => (it.type === "order" && orderCounts(it, L.oldOrders)) || (it.type === "transfer" && isActive(it))).sort(byCreated);
+  const extras = L.noAsks ? new Map() : carrierExtras(items, now);
   const usedWeek = new Map();
   const usedDay = new Map();
   // An accepted cut shrinks the order it cuts (same date), so those trucks are never booked.
@@ -169,7 +171,7 @@ export function allocate(items, now, opts = {}) {
     const trucks = it.data.trucks > 0 ? Math.max(0, it.data.trucks - (cutOf.get(it.id) || 0)) : it.data.trucks;
     const date = dateOf(it);
     if (trucks < 0) { out.set(it.id, { lane, date, trucks, cut: -trucks, contract: 0, spot: 0, days: [], overspend: 0 }); continue; }
-    const pattern = opts.oldWay ? "day" : patternOf(it);
+    const pattern = L.oldTransfers ? "day" : patternOf(it);
     const days = spreadDays(date, trucks, pattern).map(({ day, n }) => {
       const wk = weekIndex(day, now);
       const wKey = `${lane.key}|${wk}`;
@@ -348,7 +350,8 @@ export function toBook(items, now) {
 // Spot and savings on the pilot's own freight (accepted orders and transfers) vs. the same freight the old way.
 export function totals(items, now, opts = {}) {
   const alloc = allocate(items, now, opts);
-  const counted = (it) => (it.type === "transfer" && isActive(it)) || (it.type === "order" && (opts.oldWay ? it.status !== "waiting" && !it.data.retry_of : it.status === "confirmed"));
+  const L = leversOf(opts);
+  const counted = (it) => (it.type === "transfer" && isActive(it)) || (it.type === "order" && (L.oldOrders ? it.status !== "waiting" && !it.data.retry_of : it.status === "confirmed"));
   const t = { trucks: 0, contract: 0, spot: 0, overspend: 0 };
   for (const it of items) {
     const a = alloc.get(it.id);
@@ -400,4 +403,11 @@ export function toBookItems(items, now) {
       bookBy: addDays(days[0].day, -RULES.noticeDays) });
   }
   return out.sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : 0));
+}
+
+// Where the savings came from: spot cost with one lever set back to the old way, minus spot cost now.
+export function savingsBy(items, now) {
+  const base = totals(items, now).overspend;
+  const one = (k) => Math.max(0, totals(items, now, { [k]: true }).overspend - base);
+  return { checkoff: one("oldOrders"), transfers: one("oldTransfers"), carrier: one("noAsks") };
 }

@@ -252,3 +252,9 @@ input:hover, select:hover { border-color: var(--muted); }
 .cal td.open-0 { color: var(--red); }
 .by { margin-left: auto; color: var(--muted); }
 .by-soon { color: var(--red); font-weight: 700; }
+.x-from:empty { display: none; }
+.x-from { background: var(--white); border-radius: 16px; padding: 18px 22px; margin-bottom: 16px; }
+.from-row { display: grid; grid-template-columns: 140px 1fr 100px; align-items: center; gap: 12px; margin-top: 10px; font-weight: 600; }
+.from-bar { height: 14px; border-radius: 4px; background: var(--cream); overflow: hidden; }
+.from-bar i { display: block; height: 100%; background: var(--teal); }
+.from-n { text-align: right; font: 400 20px var(--serif); }

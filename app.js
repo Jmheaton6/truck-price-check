@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=31";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=31";
+import * as E from "./engine.js?v=32";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=32";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -534,6 +534,7 @@ function transfersView(store, state) {
 function execView(store, state) {
   const html = `<section class="exec">
     <div id="x-top" class="x-top"></div>
+    <div id="x-from" class="x-from"></div>
     <div id="x-cards" class="x-cards"></div>
     <button type="button" id="x-reset" class="linkish quiet">Clear all data</button>
   </section>`;
@@ -561,6 +562,11 @@ function execView(store, state) {
       <div class="big-card"><p class="big-label">Spot spent</p><p class="big-n">${money(now.overspend)}</p><p class="big-sub">${plural(now.spot, "spot truck")}</p></div>
       <div class="big-card wide"><p class="big-label">Spot share</p>${bar("Old way", old, "bad")}${bar("Now", now, now.spotShare <= RULES.spotGoal ? "good" : "bad")}
         <p class="big-sub">Goal ${pct(RULES.spotGoal)} · 2026 so far ${pct(RULES.spotToday)}</p></div>`;
+    const by = E.savingsBy(items, NOW);
+    const parts = [["Check-off", by.checkoff], ["Transfer waves", by.transfers], ["Carrier asks", by.carrier]];
+    const top = Math.max(1, ...parts.map(([, v]) => v));
+    $("#x-from").innerHTML = saved ? `<p class="big-label">Where it came from</p>${parts.map(([n, v]) => `<div class="from-row"><span>${n}</span>
+        <span class="from-bar"><i style="width:${(v / top) * 100}%"></i></span><span class="from-n">${money(v)}</span></div>`).join("")}` : "";
     const card = (name, value, sub, good) => `<div class="x-card ${good == null ? "" : good ? "x-good" : "x-bad"}"><p class="x-name">${name}</p><p class="x-n">${value}</p><p class="x-sub">${sub}</p></div>`;
     const m = s.sales.answerMin;
     $("#x-cards").innerHTML =

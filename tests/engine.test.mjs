@@ -103,6 +103,10 @@ test("savings vs. the old way: denied change and transfer waves", () => {
   const now = E.totals(items, NOW), old = E.totals(items, NOW, { oldWay: true });
   assert.deepEqual([now.trucks, now.spot], [26, 0]);
   assert.deepEqual([old.trucks, old.spot], [26, 13]);   // +4 on Nov 19 all spot, transfer 9 spot
+  const by = E.savingsBy(items, NOW);
+  assert.equal(by.checkoff, 4 * cin().spot_premium);   // the denied +4 would have gone spot
+  assert.equal(by.transfers, 9 * E.laneOf("transfer", "Mississauga, ON").spot_premium);
+  assert.equal(by.carrier, 0);
 });
 
 test("cuts free trucks; a cut inside the freeze strands cans", () => {
