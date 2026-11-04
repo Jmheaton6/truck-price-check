@@ -115,3 +115,12 @@ Safety: build on a new branch. Today's version stays live until the new one pass
 **Before you demo:** Executive → Clear all data (PIN). The live database still has 33 rows from the old versions.
 
 **Demo story (Thu Nov 5):** Customer A orders 2M cans for Nov 19 → all four accept → Logistics books 10 contract. Customer changes to 2.8M → Sales (over forecast) and Production (no line time) deny → customer taps Try Sun, Nov 22 → all accept. Logistics plans 12 to Mississauga "over 3 weeks" (12 contract vs 9 spot all-at-once) → Book all. Customer B orders 1.2M for Nov 25 → Logistics sees "1 of 6 would be spot" → Ask carrier +1 → yes → Accept. Executive: Saved about $9.3K, 0% spot now vs 44% the old way.
+
+**Later rounds (v31–v34, all live):**
+- Executive: **Where it came from** splits Saved into Check-off, Transfer waves and Carrier asks (each = spot cost with that one lever set back to the old way). In the demo story: $1,848 + $6,849 + $637 = $9,334.
+- Trucks: an **Open** column (contract trucks still free that week per lane); customer rows show the customer's name; To book rows show **book by** (red when due in 2 days); a spot-heavy transfer day offers **Over N weeks: X spot** to spread it in one click; after the carrier gives its limit, the button is replaced by its answer.
+- Orders: switching department always opens your own first waiting order (the bot caught Production answering the wrong order); a change reads "Change: 10 → 14 truckloads"; customers see plain reasons ("Too close to delivery", "No line time that week", …).
+- Engine: an accepted cut shrinks its order on the calendar (fewer trucks to book).
+- Bot now also plays harder days: a 2-day rush order, Sales changing its mind, a cut after booking, a one-day transfer fixed from the calendar, removing a transfer, and Sales trying to book (can't). Last run: 0 issues.
+- **Deck screenshots:** `node tests/deck-shots.mjs` → `Case Comp/Deck screenshots/` (16 clean 2x shots of the demo story, no banner).
+- **QR codes** regenerated in `Case Comp/QR codes/` (Home, Customer HQ, Orders, Trucks, Transfers, Executive); the previous set is in `old (v2)`.
