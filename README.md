@@ -9,8 +9,8 @@ Live: https://jmheaton6.github.io/truck-price-check/
 |---|---|---|
 | Customer HQ | `?role=customer` (Order), `&tab=pos` (My POs) | Pick your company (top right): Coca-Cola, PepsiCo, AB InBev or Molson Coors. **Order:** new order (cans in millions, delivery date) and My forecast (next 6 weeks; Share forecast sends Ball a new version). **My POs:** Open POs with status (Checking / Accepted / Booked / Denied) and Change, which opens on the card; Change requests with status; a "Try [date]" button when Ball can't do the date asked |
 | Outlook | `?role=outlook` | Forecast early warning. The next 6 weeks per customer: trucks needed, how far the forecast moved (green ≤10%, amber 10–25%, red 25%+), and trucks still open. Logistics pre-books the open trucks (Book +N) 3+ days before the week, or releases trucks when demand drops. Click a week for its forecast versions, orders, and trucks |
-| Orders | `?role=orders` | Pick your department (top right). Each department reads one check line and clicks Accept or Deny. One deny stops the order; four accepts send it to Trucks. Logistics can ask the carrier for more trucks before answering |
-| Trucks | `?role=calendar` | A week per page: a square per truck (solid = booked, outline = to book, red = spot, dashed = not accepted yet), and "Open" = contract trucks still free that week. To book: one row per order or transfer, with its book-by date, Book and Book all |
+| Orders | `?role=orders` | Pick your department (top right). Each department reads one check line and clicks Accept or Deny. One deny stops the order; four accepts send it to Trucks. |
+| Trucks | `?role=calendar` | A week per page: a square per truck (solid = booked, outline = to book, red = spot, dashed = not accepted yet). To book: one row per order or transfer, with its book-by date, Book and Book all |
 | Transfers | `?role=transfers` | Pick a warehouse, truckloads and a ship date; see contract vs. spot and the book-by date; put it on the calendar |
 | Executive | `?role=exec` | Saved vs. the old way, spot spent, spot share (old way vs. now vs. the 8% goal), and one scorecard per department |
 
@@ -27,7 +27,7 @@ Flags: `&today=2026-11-05` rehearses a date (the banner's date picker moves it, 
 - **Saved** = spot cost the old way minus spot cost now, on the pilot's own orders and transfers. The old way: every order accepted as first asked; Logistics hears about orders and transfers 1–3 days before they move (case), so anything past the scheduled trucks goes spot; no pre-booking. "Where it came from" turns the system on one piece at a time (check-off, booked ahead, transfers ahead, early warning), so the pieces add up to the total.
 - **Scorecards:** Sales, time to answer customers. Inventory, truckloads stranded. Production, line time used. Logistics, spot share and share booked 3+ days ahead.
 
-**Real** (Ball's 2026 workbook, Findlay, no shuttles): lanes, weekly averages, spot premiums. **Simulated** (stated as assumptions): customer names (illustrative; the case data has no customer names), Ball's other business on each lane, customer forecasts, stock, line time, carrier answers.
+**Real** (Ball's 2026 workbook, Findlay, no shuttles): lanes, weekly averages, spot premiums. **Simulated** (stated as assumptions): customer names (illustrative; the case data has no customer names), Ball's other business on each lane, customer forecasts, stock, line time.
 
 ## Setup
 1. Supabase: `supabase/update-3.sql` (the `items` table and `reset_items`). Nothing newer is needed.
