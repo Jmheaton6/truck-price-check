@@ -1,5 +1,5 @@
-import * as E from "./engine.js";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
+import * as E from "./engine.js?v=24";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=24";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, SIM_LINE_TIME, PATTERNS, TEAMS, QUESTIONS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -955,6 +955,18 @@ function homeView() {
 }
 
 // ---------- Boot ----------
+// Never fail silently: any error shows a banner with the fix (usually a hard reload).
+function showBroken(msg) {
+  const el = $("#mode-banner");
+  if (!el) return;
+  el.hidden = false;
+  el.classList.add("banner-bad");
+  el.textContent = `Something went wrong: ${msg}. Reload the page with Cmd+Shift+R. If it keeps happening, add &local to the link to use backup mode.`;
+}
+addEventListener("error", (e) => showBroken(e.message));
+addEventListener("unhandledrejection", (e) => showBroken(e.reason?.message || String(e.reason)));
+if (typeof E.stageOf !== "function") showBroken("this browser loaded an old copy of the app");
+
 async function main() {
   let role = PARAMS.get("role");
   let sub = PARAMS.get("tab") || "signoff";
@@ -1025,7 +1037,8 @@ async function main() {
       drawNav(state.items);
       view.live?.(state.items);
     } catch (err) {
-      toast("Can't reach the database: " + err.message, true);
+      if (/fetch|network/i.test(err.message)) toast("Can't reach the database: " + err.message, true);
+      else { showBroken(err.message); console.error(err); }
     } finally {
       busy = false;
       if (again) { again = false; state.refresh(); }
