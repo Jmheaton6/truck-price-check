@@ -60,7 +60,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 60px; }
 /* ---------- Surfaces & layout ---------- */
 .panel { background: var(--white); border-radius: 16px; padding: 22px; margin-bottom: 16px; }
 .cols { display: grid; gap: 16px; align-items: start; }
-.cols-cust { grid-template-columns: 420px 1fr; max-width: 1000px; margin: 0 auto; }
+.cols-cust { grid-template-columns: 400px 1fr; max-width: 1060px; margin: 0 auto; }
+.cols-pos { grid-template-columns: 1fr 1fr; max-width: 1100px; margin: 0 auto; }
 .cols-orders { grid-template-columns: 320px 1fr; }
 .cols-cal { grid-template-columns: 1fr 330px; }
 .cols-plan { grid-template-columns: 1.3fr 1fr; }
@@ -284,10 +285,9 @@ input:hover, select:hover { border-color: var(--muted); }
 .side .big-label { margin-top: 6px; }
 
 /* ---------- Customer forecast ---------- */
-.c-fc { grid-column: 1 / -1; }
 .c-fc .card-head { margin-bottom: 14px; }
 .c-fc h2 { margin: 0; }
-.f-weeks { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.f-weeks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .f-week { display: block; padding: 12px; border-radius: 12px; background: var(--cream); border: 1.5px solid transparent; }
 .f-week input { font: 400 22px var(--serif); padding: 8px 10px; background: var(--white); }
 .f-t { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); }
@@ -304,3 +304,17 @@ body[data-portal="customer"] .switch { background: var(--cream); }
 body[data-portal="customer"] .switch a { color: var(--muted); }
 body[data-portal="customer"] .switch a:hover { color: var(--ink); }
 body[data-portal="customer"] .switch a.on { background: var(--teal); color: var(--white); }
+
+/* ---------- Customer tabs + change editor ---------- */
+body[data-portal="customer"] .nav a { color: var(--muted); }
+body[data-portal="customer"] .nav a:hover { color: var(--ink); }
+body[data-portal="customer"] .nav a.on { background: var(--ink); color: var(--white); }
+body[data-portal="customer"] .nav a.on .count { background: var(--teal); }
+.card-edit { background: var(--white); outline: 1.5px solid var(--ink); }
+.editor { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.ed-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ed-fields .field { margin-bottom: 12px; }
+.ed-fields .amount input { font-size: 22px; max-width: 120px; padding: 8px 10px; }
+.ed-fields input[type="date"] { font-size: 16px; }
+.ed-btns { display: flex; gap: 8px; }
+.ed-btns .util { flex: 1; }

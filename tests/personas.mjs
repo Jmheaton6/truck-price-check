@@ -117,7 +117,7 @@ const iAm = (dept) => pick("Department", dept);
 await go("?" + Q.slice(1));
 await page.evaluate(() => localStorage.clear());
 
-persona("Pat (customer, Customer A buyer)", "customer", "Order 2 million cans for Thu Nov 19, then see if Ball accepted.");
+persona("Pat (customer, Coca-Cola buyer)", "customer", "Order 2 million cans for Thu Nov 19, then see if Ball accepted.");
 await task(async () => {
   await go("?" + Q.slice(1));
   await look("home");
@@ -128,6 +128,9 @@ await task(async () => {
   await fill("Deliver on", "2026-11-19");
   await click("Send order");
   if (!/sent/i.test(await toastText())) issue("No clear 'sent' message after sending the order.");
+  if (await page.locator(".card").count()) issue("The Order tab shows PO cards; they belong on My POs.");
+  await click("My POs", { role: "link" });
+  await sees("Open POs"); await sees("Change requests");
   await sees("Checking", "the order status");
   await look("order sent");
 });
@@ -138,7 +141,7 @@ for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production"
     await go("?role=orders" + Q);
     await iAm(dept);
     await look(`${dept} queue`);
-    await sees("Customer A", "the waiting order");
+    await sees("Coca-Cola", "the waiting order");
     await click("Accept", { exact: true });
     if (!/accept/i.test(await toastText())) issue("No confirmation after Accept.");
     await sees("Nothing waiting on you", "an empty queue after answering");
@@ -175,9 +178,10 @@ await task(async () => {
   await look("after book all");
 });
 
-persona("Pat (customer, Customer A buyer)", "customer2", "Promo got bigger: change the order to 2.8 million cans.");
+persona("Pat (customer, Coca-Cola buyer)", "customer2", "Promo got bigger: change the order to 2.8 million cans.");
 await task(async () => {
   await go("?role=customer" + Q);
+  await click("My POs", { role: "link" });
   await click("Change");
   await look("change form");
   await fill("Million cans", 2.8);
@@ -198,9 +202,10 @@ for (const [dept, who] of [["Sales", "Sam"], ["Production", "Paolo"]]) {
   });
 }
 
-persona("Pat (customer, Customer A buyer)", "customer3", "See what happened to my change, and take Ball's other date.");
+persona("Pat (customer, Coca-Cola buyer)", "customer3", "See what happened to my change, and take Ball's other date.");
 await task(async () => {
   await go("?role=customer" + Q);
+  await click("My POs", { role: "link" });
   await look("change denied");
   await sees("Denied", "that the change was denied");
   const tryBtn = page.getByRole("button", { name: /^Try / }).first();
@@ -220,10 +225,10 @@ for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production"
   });
 }
 
-persona("Bo (customer, Customer B buyer)", "customer4", "Order 1.2 million cans for Wed Nov 25.");
+persona("Bo (customer, PepsiCo buyer)", "customer4", "Order 1.2 million cans for Wed Nov 25.");
 await task(async () => {
   await go("?role=customer" + Q);
-  await pick("Company", "Customer B");
+  await pick("Company", "PepsiCo");
   await fill("Million cans", 1.2);
   await fill("Deliver on", "2026-11-25");
   await click("Send order");
@@ -253,10 +258,10 @@ await task(async () => {
 });
 
 // ---------- Early warning: the customer tells Ball weeks ahead ----------
-persona("Pat (customer, Customer A buyer)", "forecast", "Our Nov 29 week has a promo: tell Ball it'll be 2.8 million cans.");
+persona("Pat (customer, Coca-Cola buyer)", "forecast", "Our Nov 29 week has a promo: tell Ball it'll be 2.8 million cans.");
 await task(async () => {
   await go("?role=customer" + Q);
-  await pick("Company", "Customer A");
+  await pick("Company", "Coca-Cola");
   await look("forecast before");
   await fill("week of Nov 29", 2.8);
   await click("Share forecast");
@@ -275,7 +280,7 @@ await task(async () => {
   await look("outlook covered");
   await sees("Covered", "the week is covered now");
 });
-persona("Pat (customer, Customer A buyer)", "forecast-po", "Place the promo order: 2.8 million cans for Wed Dec 2.");
+persona("Pat (customer, Coca-Cola buyer)", "forecast-po", "Place the promo order: 2.8 million cans for Wed Dec 2.");
 await task(async () => {
   await go("?role=customer" + Q);
   await fill("Million cans", 2.8);
@@ -291,10 +296,10 @@ for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production"
     await click("Accept", { exact: true });
   });
 }
-persona("Bo (customer, Customer B buyer)", "forecast-down", "Our Dec 6 week is slow: drop it to 0.4 million cans.");
+persona("Bo (customer, PepsiCo buyer)", "forecast-down", "Our Dec 6 week is slow: drop it to 0.4 million cans.");
 await task(async () => {
   await go("?role=customer" + Q);
-  await pick("Company", "Customer B");
+  await pick("Company", "PepsiCo");
   await fill("week of Dec 6", 0.4);
   await click("Share forecast");
 });
@@ -310,10 +315,10 @@ await task(async () => {
 });
 
 // ---------- Harder days ----------
-persona("Cy (customer, Customer C buyer)", "edge-late", "Rush: order 0.4 million cans for Sat Nov 7 (2 days out).");
+persona("Cy (customer, AB InBev buyer)", "edge-late", "Rush: order 0.4 million cans for Sat Nov 7 (2 days out).");
 await task(async () => {
   await go("?role=customer" + Q);
-  await pick("Company", "Customer C");
+  await pick("Company", "AB InBev");
   await fill("Million cans", 0.4);
   await fill("Deliver on", "2026-11-07");
   await click("Send order");
@@ -330,16 +335,18 @@ await task(async () => {
   await click("Accept", { exact: true });
   await sees("1/4 accepted", "the order back in play");
 });
-persona("Cy (customer, Customer C buyer)", "edge-late2", "Check my rush order.");
+persona("Cy (customer, AB InBev buyer)", "edge-late2", "Check my rush order.");
 await task(async () => {
   await go("?role=customer" + Q);
+  await click("My POs", { role: "link" });
   await look("rush status");
   await sees("Checking", "my rush order is being checked");
 });
-persona("Pat (customer, Customer A buyer)", "edge-cut", "Demand dropped: cut the booked Nov 19 order to 1.6 million cans.");
+persona("Pat (customer, Coca-Cola buyer)", "edge-cut", "Demand dropped: cut the booked Nov 19 order to 1.6 million cans.");
 await task(async () => {
   await go("?role=customer" + Q);
-  await pick("Company", "Customer A");
+  await pick("Company", "Coca-Cola");
+  await click("My POs", { role: "link" });
   const cards = page.locator(".card", { hasText: "Thu, Nov 19" });
   await cards.first().getByRole("button", { name: "Change" }).click(); P.clicks++; await pause();
   await fill("Million cans", 1.6);

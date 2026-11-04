@@ -29,7 +29,7 @@ await go("?role=customer" + Q);
 await p.fill("#c-date", "2026-11-19"); await p.dispatchEvent("#c-date", "change");
 await shot("02 Customer HQ - new order");
 await btn("Send order");
-await shot("03 Customer HQ - order checking");
+await go("?role=customer&tab=pos" + Q); await shot("03 Customer HQ - order checking");
 
 // 2. Departments check off
 await go("?role=orders" + Q); await dept("Sales"); await shot("04 Orders - Sales checks");
@@ -43,12 +43,12 @@ await go("?role=calendar&week=2" + Q); await dept("Logistics"); await shot("07 T
 await btn("Book"); await shot("08 Trucks - booked");
 
 // 4. Customer changes demand; the check-off catches it
-await go("?role=customer" + Q); await btn("Change"); await p.fill("#c-m", "2.8"); await p.dispatchEvent("#c-m", "input");
+await go("?role=customer&tab=pos" + Q); await btn("Change"); await p.fill("#e-m", "2.8"); await p.dispatchEvent("#e-m", "input");
 await shot("09 Customer HQ - change request");
 await btn("Send change");
 await go("?role=orders" + Q); await dept("Production"); await shot("10 Orders - change fails checks");
 await btn("Deny");
-await go("?role=customer" + Q); await shot("11 Customer HQ - denied, try another date");
+await go("?role=customer&tab=pos" + Q); await shot("11 Customer HQ - denied, try another date");
 await p.getByRole("button", { name: /^Try / }).first().click(); await p.waitForTimeout(400);
 await answerAll();
 
@@ -59,7 +59,7 @@ await go("?role=calendar" + Q); await shot("13 Trucks - transfer on the calendar
 await bookAll();
 
 // 6. Spot avoided by asking the carrier early
-await go("?role=customer" + Q); await p.selectOption("#who-sel", { label: "Customer B" }); await p.waitForTimeout(300);
+await go("?role=customer" + Q); await p.selectOption("#who-sel", { label: "PepsiCo" }); await p.waitForTimeout(300);
 await p.fill("#c-m", "1.2"); await p.dispatchEvent("#c-m", "input"); await p.fill("#c-date", "2026-11-25"); await p.dispatchEvent("#c-date", "change");
 await btn("Send order");
 for (const d of ["Sales", "Inventory", "Production"]) { await go("?role=orders" + Q); await dept(d); await btn("Accept"); }

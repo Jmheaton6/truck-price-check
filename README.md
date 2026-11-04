@@ -7,7 +7,7 @@ Live: https://jmheaton6.github.io/truck-price-check/
 ## Screens
 | Screen | Link | What happens |
 |---|---|---|
-| Customer HQ | `?role=customer` | Pick your company (top right). New order: cans (millions) and a delivery date. My forecast: the next 6 weeks; Share forecast sends Ball a new version. My orders: status, Change, and a "Try [date]" button when Ball can't do the date asked |
+| Customer HQ | `?role=customer` (Order), `&tab=pos` (My POs) | Pick your company (top right): Coca-Cola, PepsiCo, AB InBev or Molson Coors. **Order:** new order (cans in millions, delivery date) and My forecast (next 6 weeks; Share forecast sends Ball a new version). **My POs:** Open POs with status (Checking / Accepted / Booked / Denied) and Change, which opens on the card; Change requests with status; a "Try [date]" button when Ball can't do the date asked |
 | Outlook | `?role=outlook` | Forecast early warning. The next 6 weeks per customer: trucks needed, how far the forecast moved (green ≤10%, amber 10–25%, red 25%+), and trucks still open. Logistics asks the carrier for the gap while there's 7+ days' notice, or releases trucks when demand drops. Click a week for its forecast versions, orders, and trucks |
 | Orders | `?role=orders` | Pick your department (top right). Each department reads one check line and clicks Accept or Deny. One deny stops the order; four accepts send it to Trucks. Logistics can ask the carrier for more trucks before answering |
 | Trucks | `?role=calendar` | A week per page: a square per truck (solid = booked, outline = to book, red = spot, dashed = not accepted yet), and "Open" = contract trucks still free that week. To book: one row per order or transfer, with its book-by date, Book and Book all |
@@ -30,7 +30,7 @@ Flags: `&today=2026-11-05` rehearses a date; `&local` is backup mode (this lapto
 - **Saved** = spot cost the old way (every order accepted as first asked, no carrier asks, transfers all on one day) minus spot cost now, on the pilot's own orders and transfers.
 - **Scorecards:** Sales, time to answer customers. Inventory, truckloads stranded. Production, line time used. Logistics, spot share and share booked 3+ days ahead.
 
-**Real** (Ball's 2026 workbook, Findlay, no shuttles): lanes, weekly averages, spot premiums. **Simulated** (stated as assumptions): Ball's other business on each lane, customer forecasts, stock, line time, carrier answers.
+**Real** (Ball's 2026 workbook, Findlay, no shuttles): lanes, weekly averages, spot premiums. **Simulated** (stated as assumptions): customer names (illustrative; the case data has no customer names), Ball's other business on each lane, customer forecasts, stock, line time, carrier answers.
 
 ## Setup
 1. Supabase: `supabase/update-3.sql` (the `items` table and `reset_items`). Nothing newer is needed.

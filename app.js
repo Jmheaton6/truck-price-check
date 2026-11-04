@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=37";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=37";
+import * as E from "./engine.js?v=38";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=38";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -141,12 +141,48 @@ function squares(moves, max = 14) {
   return shown + (parts.length > max ? `<b class="sq-more">+${parts.length - max}</b>` : "");
 }
 
-// ---------- Customer HQ ----------
-function customerView(store, state) {
-  const form = { m: 2, date: E.addDays(E.weekKey(NOW), 14 + 4), changeOf: null };
+// ---------- Customer HQ: two tabs. Order (new order and forecast) and My POs (where each one stands) ----------
+const CUST_TABS = { order: "Order", pos: "My POs" };
+const retried = (items, it) => orders(items).some((x) => String(x.data.retry_of) === String(it.id));
+// Denied, and Ball found a date that works: the customer's move.
+const needsCustomer = (items, company) => orders(items)
+  .filter((x) => x.data.customer === company && E.stageOf(x) === "denied" && !retried(items, x) && E.betterDate(items, x, NOW));
+// "10 → 14 truckloads" for a change on the PO's date; "+4 more" for one on another date.
+function changeText(items, it) {
+  const parent = byId(items, it.data.parent);
+  const before = poTotal(items, parent) - (it.status === "confirmed" && it.data.date === parent.data.date ? it.data.trucks : 0);
+  return it.data.date === parent.data.date ? `${before} → ${plural(before + it.data.trucks, "truckload")}`
+    : `${it.data.trucks > 0 ? "+" : "−"}${plural(Math.abs(it.data.trucks), "truckload")} ${it.data.trucks > 0 ? "more" : "less"}`;
+}
+// Why a department said no, in the customer's words, and a date that works.
+function denyBlock(items, it) {
+  if (E.stageOf(it) !== "denied" || !it.data.denied) return "";
+  const better = retried(items, it) ? null : E.betterDate(items, it, NOW);
+  return `<p class="why">${customerWhy(it.data.denied)}</p>
+    ${better ? `<button type="button" class="util on small" data-retry="${esc(it.id)}" data-date="${better.date}">Try ${esc(fmtDate(better.date))}</button>` : ""}`;
+}
+async function sendOrder(store, state, btn, data, msg) {
+  btn.disabled = true;
+  try {
+    const saved = await store.add({ type: "order", status: "waiting", data: { signoffs: {}, ...data } });
+    toast(typeof msg === "function" ? msg(saved) : msg);
+    state.refresh();
+    return true;
+  } catch (err) { toast("Couldn't send: " + err.message, true); return false; }
+  finally { btn.disabled = false; }
+}
+// Retry a denied order or change on the date Ball offered.
+function retry(store, state, b) {
+  const it = byId(state.items, b.dataset.retry);
+  const { kind, parent, customer, trucks, cans } = it.data;
+  return sendOrder(store, state, b, { kind, parent, customer, trucks, cans, date: b.dataset.date, retry_of: it.id }, "Sent for " + fmtDate(b.dataset.date) + ".");
+}
+const customerView = (store, state, tab) => (tab === "pos" ? customerPOs(store, state) : customerOrder(store, state));
+
+function customerOrder(store, state) {
+  const form = { m: 2, date: E.addDays(E.weekKey(NOW), 14 + 4) };
   const html = `<div class="cols cols-cust">
     <section class="panel" id="c-form"></section>
-    <section class="panel"><h2>My orders</h2><div id="c-mine" class="cards"><p class="empty">Loading…</p></div></section>
     <section class="panel c-fc"><div class="card-head"><h2>My forecast</h2><button type="button" id="f-send" class="util on">Share forecast</button></div>
       <div id="f-weeks" class="f-weeks"></div></section>
   </div>`;
@@ -174,51 +210,29 @@ function customerView(store, state) {
     } catch (err) { toast("Couldn't share: " + err.message, true); }
     finally { btn.disabled = false; }
   }
-  const changing = () => (form.changeOf ? byId(state.items, form.changeOf) : null);
 
   function drawForm() {
-    const po = changing();
     $("#c-form").innerHTML = `
-      <h1>${po ? `Change ${E.poNumber(state.items, po)}` : "New order"}</h1>
-      <label class="field"><span class="label">${po ? "New total" : "Cans"}</span>
+      <h1>New order</h1>
+      <label class="field"><span class="label">Cans</span>
         <span class="amount"><input id="c-m" type="number" min="0.2" max="40" step="0.2" inputmode="decimal" aria-label="Million cans"><span class="unit">million</span></span>
         <span class="eq" id="c-trucks"></span></label>
       <label class="field"><span class="label">Deliver on</span><input id="c-date" type="date" min="${NOW}" max="${LAST_DAY}"></label>
-      <button type="button" id="c-send" class="cta">${po ? "Send change" : "Send order"}</button>
-      ${po ? `<button type="button" id="c-cancel" class="linkish">Cancel</button>` : ""}`;
+      <button type="button" id="c-send" class="cta">Send order</button>`;
     $("#c-m").value = form.m;
     $("#c-date").value = form.date;
     $("#c-m").addEventListener("input", (e) => { form.m = +e.target.value || 0; paint(); });
     $("#c-date").addEventListener("change", (e) => { form.date = e.target.value; });
     paint();
   }
-  function paint() {
-    const po = changing();
-    const n = fromMillions(form.m);
-    const was = po ? poTotal(state.items, po) : 0;
-    $("#c-trucks").innerHTML = `= <strong>${plural(n, "truckload")}</strong>${po && n !== was ? ` <span class="delta">${n > was ? "+" : "−"}${Math.abs(n - was)}</span>` : ""}`;
-  }
-
-  async function add(btn, data, msg) {
-    btn.disabled = true;
-    try {
-      await store.add({ type: "order", status: "waiting", data: { signoffs: {}, ...data } });
-      toast(msg);
-      form.changeOf = null; form.m = 2;
-      drawForm();
-      state.refresh();
-    } catch (err) { toast("Couldn't send: " + err.message, true); }
-    finally { btn.disabled = false; }
-  }
-  function send(btn) {
-    const po = changing();
+  const paint = () => { $("#c-trucks").innerHTML = `= <strong>${plural(fromMillions(form.m), "truckload")}</strong>`; };
+  async function send(btn) {
     const n = fromMillions(form.m);
     if (!n) return toast("Enter an amount.", true);
     if (form.date < NOW || form.date > LAST_DAY) return toast("Pick a date in the next 6 weeks.", true);
-    if (!po) return add(btn, { kind: "po", customer: state.company, trucks: n, cans: n * RULES.cansPerTruck, date: form.date }, "Order sent.");
-    const delta = n - poTotal(state.items, po);
-    if (!delta) return toast("That's the same as now.", true);
-    return add(btn, { kind: "change", parent: po.id, customer: po.data.customer, trucks: delta, cans: delta * RULES.cansPerTruck, date: form.date }, "Change sent.");
+    const ok = await sendOrder(store, state, btn, { kind: "po", customer: state.company, trucks: n, cans: n * RULES.cansPerTruck, date: form.date },
+      (saved) => `Order sent: ${E.poNumber([...state.items, saved], saved)}`);
+    if (ok) { form.m = 2; drawForm(); }
   }
 
   function mount() {
@@ -234,53 +248,96 @@ function customerView(store, state) {
     });
     $("#app").addEventListener("click", (e) => {
       const b = e.target.closest("button");
+      if (b?.id === "c-send") return send(b);
+      if (b?.id === "f-send") return shareForecast(b);
+    });
+  }
+  function live() {
+    if (fc.company !== state.company || !document.activeElement?.dataset?.fw) drawForecast(); // don't redraw under someone typing
+  }
+  return { html, mount, live };
+}
+
+function customerPOs(store, state) {
+  let editing = null;                 // the PO whose change editor is open
+  const edit = { m: 0, date: "" };
+  const html = `<div class="cols cols-pos">
+    <section class="panel"><h2>Open POs</h2><div id="c-pos" class="cards"><p class="empty">Loading…</p></div></section>
+    <section class="panel"><h2>Change requests</h2><div id="c-changes" class="cards"></div></section>
+  </div>`;
+
+  const editor = (po) => `<div class="editor">
+      <div class="ed-fields">
+        <label class="field"><span class="label">New total</span>
+          <span class="amount"><input id="e-m" type="number" min="0" max="40" step="0.2" inputmode="decimal" value="${edit.m}" aria-label="Million cans"><span class="unit">million</span></span>
+          <span class="eq" id="e-trucks"></span></label>
+        <label class="field"><span class="label">Deliver on</span><input id="e-date" type="date" min="${NOW}" max="${LAST_DAY}" value="${edit.date}"></label>
+      </div>
+      <div class="ed-btns"><button type="button" class="util on" id="e-send" data-po="${esc(po.id)}">Send change</button><button type="button" class="util" id="e-cancel">Cancel</button></div>
+    </div>`;
+  function paintEdit() {
+    const po = byId(state.items, editing);
+    const el = $("#e-trucks");
+    if (!po || !el) return;
+    const n = fromMillions(edit.m), was = poTotal(state.items, po);
+    el.innerHTML = `= <strong>${plural(n, "truckload")}</strong>${n !== was ? ` <span class="delta">${n > was ? "+" : "−"}${Math.abs(n - was)}</span>` : ""}`;
+  }
+  async function sendChange(btn) {
+    const po = byId(state.items, editing);
+    const n = fromMillions(edit.m);
+    if (edit.date < NOW || edit.date > LAST_DAY) return toast("Pick a date in the next 6 weeks.", true);
+    const delta = n - poTotal(state.items, po);
+    if (!delta) return toast("That's the same as now.", true);
+    const ok = await sendOrder(store, state, btn, { kind: "change", parent: po.id, customer: po.data.customer, trucks: delta, cans: delta * RULES.cansPerTruck, date: edit.date }, "Change sent.");
+    if (ok) { editing = null; drawPOs(state.items); }
+  }
+
+  function mount() {
+    $("#app").addEventListener("input", (e) => {
+      if (e.target.id === "e-m") { edit.m = +e.target.value || 0; paintEdit(); }
+    });
+    $("#app").addEventListener("change", (e) => { if (e.target.id === "e-date") edit.date = e.target.value; });
+    $("#app").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
       if (!b) return;
-      if (b.id === "c-send") return send(b);
-      if (b.id === "f-send") return shareForecast(b);
-      if (b.id === "c-cancel") { form.changeOf = null; form.m = 2; return drawForm(); }
       if (b.dataset.change) {
-        form.changeOf = b.dataset.change;
-        const po = changing();
-        form.m = millions(poTotal(state.items, po));
-        form.date = po.data.date;
-        drawForm();
-        $("#c-m").focus();
-        return scrollTo({ top: 0, behavior: "smooth" });
+        const po = byId(state.items, b.dataset.change);
+        editing = po.id; edit.m = millions(poTotal(state.items, po)); edit.date = po.data.date;
+        drawPOs(state.items);
+        return $("#e-m")?.focus();
       }
-      if (b.dataset.retry) {
-        // Denied: send the same order (or change) again for a date that works.
-        const it = byId(state.items, b.dataset.retry);
-        const { kind, parent, customer, trucks, cans } = it.data;
-        return add(b, { kind, parent, customer, trucks, cans, date: b.dataset.date, retry_of: it.id }, "Sent for " + fmtDate(b.dataset.date) + ".");
-      }
+      if (b.id === "e-cancel") { editing = null; return drawPOs(state.items); }
+      if (b.id === "e-send") return sendChange(b);
+      if (b.dataset.retry) return retry(store, state, b);
     });
   }
 
-  // One line per order: what, when, where it stands. A deny shows why and a date that works.
-  function line(items, it) {
-    const st = E.stageOf(it);
-    const what = isChange(it) ? `Change ${it.data.trucks > 0 ? "+" : "−"}${Math.abs(it.data.trucks)}` : plural(it.data.trucks, "truckload");
-    let extra = "";
-    if (st === "denied" && it.data.denied) {
-      const retried = orders(items).some((x) => String(x.data.retry_of) === String(it.id));
-      const better = retried ? null : E.betterDate(items, it, NOW);
-      extra = `<p class="why">${customerWhy(it.data.denied)}</p>
-        ${better ? `<button type="button" class="util on small" data-retry="${esc(it.id)}" data-date="${better.date}">Try ${esc(fmtDate(better.date))}</button>` : ""}`;
-    }
-    return `<div class="o-line"><span class="o-what">${what} · ${esc(fmtDate(it.data.date))}</span>${stageChip(it, true)}</div>${extra}`;
+  function drawPOs(items) {
+    const pos = orders(items).filter((x) => !isChange(x) && x.data.customer === state.company).reverse();
+    if (editing && !pos.some((x) => String(x.id) === String(editing))) editing = null;
+    $("#c-pos").innerHTML = pos.length ? pos.map((po) => {
+      const st = E.stageOf(po), total = poTotal(items, po);
+      const open = String(po.id) === String(editing);
+      return `<article class="card${open ? " card-edit" : ""}">
+        <div class="card-head"><span class="pill">${E.poNumber(items, po)}</span>${stageChip(po, true)}</div>
+        <div class="o-line"><span class="o-what">${millions(total)}M cans · ${plural(total, "truckload")} · ${esc(fmtDate(po.data.date))}</span>
+          ${st !== "denied" && !open ? `<button type="button" class="util small" data-change="${esc(po.id)}">Change</button>` : ""}</div>
+        ${denyBlock(items, po)}
+        ${open ? editor(po) : ""}
+      </article>`;
+    }).join("") : `<p class="empty">No orders yet.</p>`;
+    paintEdit();
   }
 
   function live(items) {
-    if (form.changeOf && !changing()) { form.changeOf = null; drawForm(); }
-    const pos = orders(items).filter((x) => !isChange(x) && x.data.customer === state.company).reverse();
-    $("#c-mine").innerHTML = pos.length ? pos.map((po) => `<article class="card">
-        <div class="card-head"><span class="pill">${E.poNumber(items, po)}</span>
-          ${["checking", "accepted", "booked"].includes(E.stageOf(po)) ? `<button type="button" class="util small" data-change="${esc(po.id)}">Change</button>` : ""}</div>
-        ${line(items, po)}
-        ${changesOf(items, po).map((c) => `<div class="sub-line">${line(items, c)}</div>`).join("")}
-      </article>`).join("") : `<p class="empty">No orders yet.</p>`;
-    if (!form.changeOf) paint();
-    if (fc.company !== state.company || !document.activeElement?.dataset?.fw) drawForecast(); // don't redraw under someone typing
+    // Don't redraw the PO list under someone typing a change.
+    if (!editing || !$("#c-pos").contains(document.activeElement)) drawPOs(items);
+    const changes = orders(items).filter((x) => isChange(x) && x.data.customer === state.company).reverse();
+    $("#c-changes").innerHTML = changes.length ? changes.map((c) => `<article class="card">
+        <div class="card-head"><span class="pill">${E.poNumber(items, c)}</span>${stageChip(c, true)}</div>
+        <div class="o-line"><span class="o-what">${changeText(items, c)} · ${esc(fmtDate(c.data.date))}</span></div>
+        ${denyBlock(items, c)}
+      </article>`).join("") : `<p class="empty">No changes.</p>`;
   }
 
   return { html, mount, live };
@@ -468,8 +525,7 @@ function ordersView(store, state) {
     const parent = isChange(it) ? byId(items, it.data.parent) : null;
     return `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${stageChip(it)}</div>
       <h1 class="detail-h">${esc(custName(it.data.customer))}</h1>
-      <p class="d-what">${parent ? (() => { const before = poTotal(items, parent) - (it.status === "confirmed" && it.data.date === parent.data.date ? it.data.trucks : 0);
-        return it.data.date === parent.data.date ? `Change: ${before} → ${plural(before + it.data.trucks, "truckload")}` : `Change: +${plural(it.data.trucks, "truckload")} more`; })() : whatOf(items, it)} · ${esc(fmtDate(it.data.date))}</p>
+      <p class="d-what">${parent ? `Change: ${changeText(items, it)}` : whatOf(items, it)} · ${esc(fmtDate(it.data.date))}</p>
       <div class="dcards">${TEAMS.map(card).join("")}</div>
       ${st === "denied" && it.data.denied ? `<p class="note note-no">${DEPT[it.data.denied.team]} denied: ${esc(it.data.denied.why)}</p>` : ""}
       ${st === "accepted" ? `<p class="note note-ok">${icon("check")}Accepted · <a href="${link("calendar", { week: E.weekIndex(it.data.date, NOW) })}">Book trucks</a></p>` : ""}
@@ -781,6 +837,7 @@ async function main() {
   let role = asked in ALIASES ? ALIASES[asked] : asked;
   if (role !== "customer" && !BALL[role]) role = null;
   const portal = role === "customer" ? "customer" : role ? "ball" : "home";
+  const custTab = PARAMS.get("tab") === "pos" ? "pos" : "order";
   document.body.dataset.portal = portal;
   document.body.dataset.role = role || "home";
   // Who's using it: a department (Ball) or a company (customer). Old links like ?role=sales pick the department.
@@ -803,6 +860,12 @@ async function main() {
 
   const store = withForecasts(await makeStore());
   const drawNav = (items = []) => {
+    if (portal === "customer") {
+      const need = needsCustomer(items, state.company).length;
+      $("#nav").innerHTML = Object.entries(CUST_TABS).map(([k, name]) =>
+        `<a href="${link("customer", k === "pos" ? { tab: "pos" } : {})}" class="${k === custTab ? "on" : ""}">${name}${k === "pos" && need ? ` <span class="count">${need}</span>` : ""}</a>`).join("");
+      return;
+    }
     if (portal !== "ball") { $("#nav").innerHTML = ""; return; }
     const mine = TEAMS.includes(state.dept) ? orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[state.dept]).length : 0;
     const isLog = state.dept === "logistics";
@@ -823,10 +886,10 @@ async function main() {
   if (!store.live) notes.push(FORCE_LOCAL ? "Backup mode: this laptop only" : "Local mode");
   if (PARAMS.get("today")) notes.push(`Today: ${fmtDate(NOW)}`);
   if (notes.length) { $("#mode-banner").hidden = false; $("#mode-banner").textContent = notes.join(" · "); }
-  document.title = portal === "customer" ? "Customer HQ" : portal === "ball" ? `${BALL[role]} · Ball HQ` : "Ball · Findlay pilot";
+  document.title = portal === "customer" ? `${CUST_TABS[custTab]} · Customer HQ` : portal === "ball" ? `${BALL[role]} · Ball HQ` : "Ball · Findlay pilot";
 
   const view = portal === "home" ? homeView()
-    : portal === "customer" ? customerView(store, state)
+    : portal === "customer" ? customerView(store, state, custTab)
     : role === "outlook" ? outlookView(store, state)
     : role === "orders" ? ordersView(store, state)
     : role === "calendar" ? calendarView(store, state)

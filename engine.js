@@ -47,10 +47,10 @@ export const SIM_BOOKED = {
 // One customer filling plant per customer lane. forecast = truckloads a week the customer told Ball to expect;
 // stock = truckloads of their labeled cans already at Findlay.
 export const SIM_CUSTOMERS = {
-  "Cincinnati, OH": { name: "Customer A", stock: 2, forecast: [8, 8, 10, 8, 8, 8] },
-  "Columbus, OH":   { name: "Customer B", stock: 0, forecast: [5, 5, 6, 5, 5, 5] },
-  "Mertztown, PA":  { name: "Customer C", stock: 1, forecast: [1, 1, 2, 1, 1, 2] },
-  "Downey, CA":     { name: "Customer D", stock: 0, forecast: [1, 1, 1, 2, 1, 1] },
+  "Cincinnati, OH": { name: "Coca-Cola", stock: 2, forecast: [8, 8, 10, 8, 8, 8] },
+  "Columbus, OH":   { name: "PepsiCo", stock: 0, forecast: [5, 5, 6, 5, 5, 5] },
+  "Mertztown, PA":  { name: "AB InBev", stock: 1, forecast: [1, 1, 2, 1, 1, 2] },
+  "Downey, CA":     { name: "Molson Coors", stock: 0, forecast: [1, 1, 1, 2, 1, 1] },
 };
 // Open line time at Findlay for these customers, in truckloads of cans, weeks 0–5.
 export const SIM_LINE_TIME = [3, 6, 8, 10, 8, 8];
