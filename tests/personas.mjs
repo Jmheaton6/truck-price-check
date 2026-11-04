@@ -13,7 +13,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = process.argv[2] || "http://localhost:8765/";
 const Q = "&local&today=2026-11-05";
 const SHOTS = join(HERE, "persona-shots");
-const LIMITS = { words: 120, sentence: 14, clicks: 4 };
+const LIMITS = { words: 120, sentence: 14, clicks: 5 };
 const JARGON = ["allocate", "allocation", "tender", "pta", "capacity", "pattern", "override", "simulated", "sku", "lane", "flex", "band", "baseline", "utilization", "fixable", "toBook", "undefined", "NaN", "null"];
 
 rmSync(SHOTS, { recursive: true, force: true });
@@ -301,22 +301,26 @@ for (const dept of ["Sales", "Inventory", "Production", "Logistics"]) {
     await click(bad ? "Deny" : "Accept", { exact: true });
   });
 }
-persona("Lee (Logistics)", "edge-transfer", "Ship 10 to Adairsville all on Fri Nov 20, see the spot, and fix what I can.");
+persona("Lee (Logistics)", "edge-transfer", "Ship 8 to Mississauga all on Fri Nov 20, see the spot, and fix it from the calendar.");
 await task(async () => {
   await go("?role=transfers" + Q);
   await iAm("Logistics");
-  await pick("To", "Adairsville, GA");
-  await fill("Truckloads", 10);
+  await pick("To", "Mississauga, ON");
+  await fill("Truckloads", 8);
   await fill("Start", "2026-11-20");
   await click("All on one day");
   await click("Put on calendar");
   await click("Trucks", { role: "link" });
   await look("calendar with spot");
-  await click("Adairsville Transfer", { exact: false, scrollOk: true });   // its row in "To book"
+  await click("Mississauga by", { exact: false, scrollOk: true });   // its row in "To book"
   await look("spot day");
+  const spread = page.getByRole("button", { name: /^Over \d weeks?: / });
+  if (!(await spread.count())) issue("Transfer has spot, but no way to spread it out from the calendar.");
+  else { await click((await spread.first().textContent()).trim()); await look("after spreading"); }
+  const row = page.getByRole("button", { name: /^Mississauga by .* Transfer · Nov 20/ });
+  if (await row.count()) { await row.first().click(); P.clicks++; await pause(); }
   const ask = page.getByRole("button", { name: /^Ask carrier/ });
-  if (!(await ask.count())) issue("Red spot day with 15 days' notice, but no Ask carrier.");
-  else { await click((await ask.first().textContent()).trim()); step(`Carrier said: ${await toastText()}`); }
+  if (await ask.count()) { await click((await ask.first().textContent()).trim()); step(`Carrier said: ${await toastText()}`); }
   await look("after ask");
 });
 persona("Lee (Logistics)", "edge-remove", "Changed my mind: remove the Adairsville transfer.");

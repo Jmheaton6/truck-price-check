@@ -62,7 +62,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 60px; }
 .cols { display: grid; gap: 16px; align-items: start; }
 .cols-cust { grid-template-columns: 420px 1fr; max-width: 1000px; margin: 0 auto; }
 .cols-orders { grid-template-columns: 320px 1fr; }
-.cols-cal { grid-template-columns: 1fr 320px; }
+.cols-cal { grid-template-columns: 1fr 330px; }
 .cols-plan { grid-template-columns: 1.3fr 1fr; }
 
 /* ---------- Controls ---------- */
@@ -259,3 +259,9 @@ input:hover, select:hover { border-color: var(--muted); }
 .from-bar i { display: block; height: 100%; background: var(--teal); }
 .from-n { text-align: right; font: 400 20px var(--serif); }
 .said { font-size: 14px; font-weight: 600; color: var(--teal); }
+.tobook .row-top { justify-content: space-between; }
+.tobook .row-sub { gap: 8px; }
+.tobook .by { margin-left: 0; font-size: 13px; font-weight: 600; }
+.tobook .row-top { gap: 8px; }
+.tobook .row-top strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tobook .by { white-space: nowrap; flex: none; }

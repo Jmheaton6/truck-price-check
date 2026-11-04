@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 1:33:22 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 1:38:22 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -30,7 +30,7 @@ Run: 11/4/2026, 1:33:22 AM · http://localhost:8765/ · backup mode, today = Thu
 | Inventory team | Answer the cut. | yes | 2 | 0 |
 | Production team | Answer the cut. | yes | 2 | 0 |
 | Logistics team | Answer the cut. | yes | 2 | 0 |
-| Lee (Logistics) | Ship 10 to Adairsville all on Fri Nov 20, see the spot, and fix what I can. | yes | 7 | 0 |
+| Lee (Logistics) | Ship 8 to Mississauga all on Fri Nov 20, see the spot, and fix it from the calendar. | yes | 9 | 0 |
 | Lee (Logistics) | Changed my mind: remove the Adairsville transfer. | yes | 2 | 0 |
 | Sam (Sales) | Try to book trucks even though I'm in Sales. | yes | 1 | 0 |
 | Erin (Executive) | See how each department is doing and what we saved vs. the spot we're still paying for. | yes | 1 | 0 |
@@ -106,10 +106,10 @@ Run: 11/4/2026, 1:33:22 AM · http://localhost:8765/ · backup mode, today = Thu
 
 **Screens:**
 - order accepted: 59 words, longest line 6 words, main button visible · `07-logistics-order-accepted.png`
-- calendar: 71 words, longest line 12 words, main button none · `08-logistics-calendar.png`
+- calendar: 72 words, longest line 12 words, main button none · `08-logistics-calendar.png`
 - transfers: 57 words, longest line 10 words, main button visible · `09-logistics-transfers.png`
 - transfer planned: 70 words, longest line 14 words, main button visible · `10-logistics-transfer-planned.png`
-- calendar with transfer: 69 words, longest line 11 words, main button none · `11-logistics-calendar-with-transfer.png`
+- calendar with transfer: 70 words, longest line 11 words, main button none · `11-logistics-calendar-with-transfer.png`
 - after book all: 67 words, longest line 5 words, main button none · `12-logistics-after-book-all.png`
 
 ## Pat (customer, Customer A buyer)
@@ -314,24 +314,26 @@ Run: 11/4/2026, 1:33:22 AM · http://localhost:8765/ · backup mode, today = Thu
 - cut Logistics: 61 words, longest line 10 words, main button none · `25-edge-cut-logistics-cut-logistics.png`
 
 ## Lee (Logistics)
-*Ship 10 to Adairsville all on Fri Nov 20, see the spot, and fix what I can.*
+*Ship 8 to Mississauga all on Fri Nov 20, see the spot, and fix it from the calendar.*
 
 **What I did:**
 - Picked "Logistics" in "Department"
-- Picked "Adairsville, GA" in "To"
-- Typed 10 in "Truckloads"
+- Picked "Mississauga, ON" in "To"
+- Typed 8 in "Truckloads"
 - Typed 2026-11-20 in "Start"
 - Clicked "All on one day"
 - Clicked "Put on calendar"
 - Clicked "Trucks"
-- Clicked "Adairsville Transfer"
-- Clicked "Ask carrier for +10"
-- Carrier said: Carrier: Only +5
+- Clicked "Mississauga by"
+- Clicked "Over 1 week: 5 spot"
+- Clicked "Ask carrier for +1"
+- Carrier said: Carrier: Yes: +1
 
 **Screens:**
-- calendar with spot: 89 words, longest line 14 words, main button visible · `26-edge-transfer-calendar-with-spot.png`
-- spot day: 77 words, longest line 7 words, main button visible · `27-edge-transfer-spot-day.png`
-- after ask: 83 words, longest line 7 words, main button visible · `28-edge-transfer-after-ask.png`
+- calendar with spot: 92 words, longest line 14 words, main button visible · `26-edge-transfer-calendar-with-spot.png`
+- spot day: 82 words, longest line 7 words, main button visible · `27-edge-transfer-spot-day.png`
+- after spreading: 95 words, longest line 13 words, main button visible · `28-edge-transfer-after-spreading.png`
+- after ask: 80 words, longest line 7 words, main button visible · `29-edge-transfer-after-ask.png`
 
 ## Lee (Logistics)
 *Changed my mind: remove the Adairsville transfer.*
@@ -361,7 +363,7 @@ Run: 11/4/2026, 1:33:22 AM · http://localhost:8765/ · backup mode, today = Thu
 - Saved shows $8,410
 
 **Screens:**
-- executive: 67 words, longest line 7 words, main button none · `29-exec-executive.png`
+- executive: 67 words, longest line 7 words, main button none · `30-exec-executive.png`
 
 ## Final data
 | # | Type | Status | What | Date | Booked days |
@@ -374,5 +376,5 @@ Run: 11/4/2026, 1:33:22 AM · http://localhost:8765/ · backup mode, today = Thu
 | 6 | ask order | yes | Columbus, OH 1 | 2026-11-25 | 0 |
 | 7 | order po | waiting | Mertztown, PA 2 | 2026-11-07 | 0 |
 | 8 | order change | confirmed | Cincinnati, OH -2 (of #1) | 2026-11-19 | 0 |
-| 9 | transfer | declined | Adairsville, GA 10 | 2026-11-20 | 0 |
-| 10 | ask transfer | part | Adairsville, GA 10 | 2026-11-20 | 0 |
+| 9 | transfer | declined | Mississauga, ON 8 | 2026-11-20 | 0 |
+| 10 | ask transfer | yes | Mississauga, ON 1 | 2026-11-20 | 0 |

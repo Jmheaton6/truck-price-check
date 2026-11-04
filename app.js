@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=33";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=33";
+import * as E from "./engine.js?v=34";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=34";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -369,6 +369,15 @@ function calendarView(store, state) {
         return live(state.items);
       }
       if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
+      const sp = e.target.closest("button[data-spread]");
+      if (sp) {
+        if (state.dept !== "logistics") return toast("Switch to Logistics.", true);
+        const it = byId(await store.list(), sp.dataset.spread);
+        await store.update(it.id, { data: { ...it.data, pattern: sp.dataset.pattern } });
+        toast(`Spread out: ${PATTERNS[sp.dataset.pattern].label.toLowerCase()}.`);
+        pick = null;
+        return state.refresh();
+      }
       const b = e.target.closest("button[data-book], button[data-ask], button[data-bookall], button[data-bookitem]");
       if (!b) return;
       if (state.dept !== "logistics") return toast("Switch to Logistics to book.", true);
@@ -425,6 +434,13 @@ function calendarView(store, state) {
           <ul class="moves">${c.moves.map((m) => `<li><span>${m.it.type === "order" ? `${E.poNumber(items, m.it)} · ${esc(custName(m.it.data.customer))}` : "Transfer"}</span>
             <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}${m.booked ? ` ${icon("check")}` : ""}</span></li>`).join("") || `<li class="empty">Nothing moving.</li>`}</ul>
           ${isLog && c.toBook ? `<button type="button" class="cta" data-book="1" data-cellkey="${esc(pick)}">Book ${plural(c.toBook, "truck")}</button>` : ""}
+          ${isLog ? c.moves.filter((m) => m.it.type === "transfer" && m.spot && !m.booked).map((m) => {
+            // A transfer with spot trucks: try spreading it out; offer the pattern with the fewest spot trucks.
+            const now = E.allocate(items, NOW).get(m.it.id).spot;
+            const best = Object.keys(PATTERNS).map((k) => ({ k, spot: E.allocate(items.map((x) => (x.id === m.it.id ? { ...x, data: { ...x.data, pattern: k } } : x)), NOW).get(m.it.id).spot }))
+              .reduce((a, b) => (b.spot < a.spot ? b : a));
+            return best.spot < now ? `<button type="button" class="util on wide" data-spread="${esc(m.it.id)}" data-pattern="${best.k}">${PATTERNS[best.k].label}: ${best.spot} spot</button>` : "";
+          }).join("") : ""}
           ${isLog && canAsk ? `<button type="button" class="util wide" data-ask="${c.fixable}" data-cellkey="${esc(pick)}">Ask carrier for +${c.fixable}</button>` : ""}
           ${said.text ? `<p class="said">${esc(said.text)}</p>` : ""}
           ${!isLog && c.toBook ? `<p class="small">Logistics books this.</p>` : ""}`;
@@ -438,9 +454,9 @@ function calendarView(store, state) {
       : E.atNoon(x.first).getMonth() === E.atNoon(x.last).getMonth() ? `${fmtShort(x.first)}–${E.atNoon(x.last).getDate()}` : `${fmtShort(x.first)}–${fmtShort(x.last)}`);
     return `<h2>To book</h2><ul class="tobook">${list.map((x) => `<li class="tb-row">
         <button type="button" class="row" data-cell="${esc(x.lane.key)}@${x.first}">
-          <span class="row-top"><strong>${esc(name(x))}</strong></span>
-          <span class="row-sub">${esc(when(x))} · <span class="t-con">${x.contract}</span>${x.spot ? ` <span class="t-spot">${x.spot} spot</span>` : ""}
-            <span class="by${E.daysBetween(NOW, x.bookBy) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(x.bookBy))}</span></span></button>
+          <span class="row-top"><strong>${esc(name(x))}</strong><span class="by${E.daysBetween(NOW, x.bookBy) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(x.bookBy))}</span></span>
+          <span class="row-sub">${esc(when(x))}</span>
+          <span class="row-sub"><span class="t-con">${x.contract} contract</span>${x.spot ? `<span class="t-spot">${x.spot} spot</span>` : ""}</span></button>
         ${isLog ? `<button type="button" class="util small" data-bookitem="${esc(x.it.id)}">Book</button>` : ""}</li>`).join("")}</ul>
       ${isLog ? (list.length > 1 ? `<button type="button" class="cta" data-bookall="1">Book all ${list.reduce((s, x) => s + x.trucks, 0)}</button>` : "") : `<p class="small">Logistics books these.</p>`}`;
   }
