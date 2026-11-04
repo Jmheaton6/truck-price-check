@@ -147,6 +147,17 @@ await task(async () => {
   if (!/sent to logistics/i.test(await toastText())) issue("No sign the prebuild reached Logistics.");
 });
 
+persona("Lee (Logistics)", "warning", "Coca-Cola's promo week needs more trucks than our carriers hold. Line them up now.");
+await task(async () => {
+  await go("?role=exec" + Q);
+  await hub("Logistics", "Lanes");
+  await look("early warning");
+  await sees("Early warning");
+  await sees("7 trucks", "the promo week's trucks vs the room");
+  await click("Add 2", { exact: true });
+  if (!/lined up/i.test(await toastText())) issue("No sign the extra trucks were lined up.");
+});
+
 persona("Lee (Logistics)", "transfers", "Schedule the prebuild so it doesn't go spot.");
 await task(async () => {
   await go("?role=exec" + Q);

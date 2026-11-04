@@ -47,13 +47,13 @@ export const TIERS = ["Primary", "Backup 1", "Backup 2"];
 // One customer per customer lane. Names are illustrative. forecast = truckloads a week the customer told Ball
 // to expect; stock = truckloads of their labeled cans already made; history = orders kept outside the 3-day fence.
 export const SIM_CUSTOMERS = {
-  "Random Lake, WI": { name: "Coca-Cola",        stock: 1, forecast: [5, 5, 6, 5, 5, 5], history: { kept: 28, total: 30 } },
-  "Alsip, IL":       { name: "PepsiCo",          stock: 0, forecast: [4, 4, 4, 5, 4, 4], history: { kept: 27, total: 30 } },
-  "Memphis, TN":     { name: "AB InBev",         stock: 1, forecast: [3, 3, 4, 3, 3, 4], history: { kept: 24, total: 30 } },
-  "Cold Spring, MN": { name: "Molson Coors",     stock: 0, forecast: [2, 1, 2, 2, 1, 2], history: { kept: 26, total: 30 } },
-  "Cincinnati, OH":  { name: "Red Bull",         stock: 0, forecast: [1, 2, 1, 2, 1, 1], history: { kept: 29, total: 30 } },
-  "Rockford, IL":    { name: "Keurig Dr Pepper", stock: 0, forecast: [1, 1, 2, 1, 1, 1], history: { kept: 25, total: 30 } },
-  "Monroe, WI":      { name: "Constellation",    stock: 0, forecast: [1, 1, 1, 2, 1, 1], history: { kept: 22, total: 30 } },
+  "Random Lake, WI": { name: "Coca-Cola",        stock: 1, forecast: [5, 5, 5, 5, 5, 5], history: { kept: 28, total: 30 } },
+  "Alsip, IL":       { name: "PepsiCo",          stock: 0, forecast: [5, 5, 5, 5, 5, 5], history: { kept: 27, total: 30 } },
+  "Memphis, TN":     { name: "AB InBev",         stock: 1, forecast: [1, 1, 1, 1, 1, 1], history: { kept: 24, total: 30 } },
+  "Cold Spring, MN": { name: "Molson Coors",     stock: 0, forecast: [1, 1, 1, 1, 1, 1], history: { kept: 26, total: 30 } },
+  "Cincinnati, OH":  { name: "Red Bull",         stock: 0, forecast: [1, 1, 1, 1, 1, 1], history: { kept: 29, total: 30 } },
+  "Rockford, IL":    { name: "Keurig Dr Pepper", stock: 0, forecast: [1, 1, 1, 1, 1, 1], history: { kept: 25, total: 30 } },
+  "Monroe, WI":      { name: "Constellation",    stock: 0, forecast: [1, 1, 1, 1, 1, 1], history: { kept: 22, total: 30 } },
 };
 // Open line time at Monticello for these customers, in truckloads of cans, weeks 0–5.
 export const SIM_LINE_TIME = [3, 6, 8, 10, 8, 8];
@@ -148,8 +148,8 @@ export const overspend = (lane, spot) => spot * lane.spot_premium;
 // moves: [{ it, lane, day, n, tenderOn, held }]. Booked moves hold their trucks first; the rest go in line,
 // Priority customers first, then first come first served. For each move: primary (if tendered 3+ days ahead),
 // then backup 1, then backup 2, each up to its daily share and what's left of its weekly commitment.
-function tender(moves, now) {
-  const usedDay = new Map(), usedWeek = new Map();
+function tender(moves, now, extra = new Map()) {
+  const usedDay = new Map(), usedWeek = new Map(), usedExtra = new Map();
   const out = new Map();
   for (const m of moves) {
     let left = m.n;
@@ -166,6 +166,14 @@ function tender(moves, now) {
       got.push({ name: c.name, short: c.short, tier: c.tier, n: take });
       left -= take;
     }
+    // Then the extra trucks Logistics lined up for that week (early warning), any day of the week.
+    (extra.get(`${m.lane.key}|${weekKey(m.day)}`) || []).forEach((x, i) => {
+      const k = `${m.lane.key}|${weekKey(m.day)}|${i}`, take = Math.min(left, x.n - (usedExtra.get(k) || 0));
+      if (take <= 0) return;
+      usedExtra.set(k, (usedExtra.get(k) || 0) + take);
+      got.push({ name: x.carrier, short: shortName(x.carrier), tier: 3, n: take });
+      left -= take;
+    });
     out.set(m, { carriers: got, contract: m.n - left, short: left });
   }
   return out;
@@ -206,7 +214,7 @@ export function allocate(items, now) {
       }
     }
   }
-  const got = tender(lineUp(moves, (m) => (m.it.type === "order" && prio.get(m.it.data.customer) ? 1 : 0)), now);
+  const got = tender(lineUp(moves, (m) => (m.it.type === "order" && prio.get(m.it.data.customer) ? 1 : 0)), now, extraTrucks(items));
   for (const m of moves) {
     const g = got.get(m);
     const r = result.get(m.it.id) || { lane: m.lane, trucks: 0, days: [], contract: 0, spot: 0, counter: 0, ballSpot: 0, fee: 0, overspend: 0 };
@@ -224,6 +232,52 @@ export function allocate(items, now) {
   for (const r of result.values()) r.days.sort((a, b) => (a.day < b.day ? -1 : 1));
   return result;
 }
+
+// ---------- Early warning: each week's trucks vs the routing guide, weeks ahead ----------
+// Extra trucks Logistics lined up: type "room", data { lane (key), week (Sunday), carrier, n }. n < 0 = told carriers fewer.
+export function extraTrucks(items) {
+  const out = new Map();
+  for (const x of items) if (x.type === "room" && x.data.n > 0) {
+    const k = `${x.data.lane}|${x.data.week}`;
+    out.set(k, [...(out.get(k) || []), { carrier: x.data.carrier, n: x.data.n }]);
+  }
+  return out;
+}
+// Per lane and week: trucks expected (customer: forecast or orders, whichever is more; warehouse: prebuilds),
+// room = the routing guide's weekly commitments, zone G (within 10%) / Y (10–25%) / R (25%+) / C (covered by extra trucks).
+// Customer lanes always; a warehouse lane only when it has a prebuild in the 6 weeks. Warehouses flag only increases.
+export function earlyWarning(items, now) {
+  const weeks = Array.from({ length: RULES.weeks }, (_, wk) => addDays(weekKey(now), wk * 7));
+  const alloc = allocate(items, now);
+  const rows = [];
+  for (const lane of PILOT_LANES) {
+    const room = lane.routing.reduce((s, c) => s + c.weekly, 0);
+    const t = weeks.map((week, wk) => {
+      if (lane.kind === "order") {
+        const ordered = items.filter((x) => x.type === "order" && isActive(x) && x.data.customer === lane.destination && weekKey(x.data.date) === week).reduce((s, x) => s + x.data.trucks, 0);
+        return Math.max(latestForecast(items, lane.destination, wk, now), ordered);
+      }
+      return items.filter((x) => x.type === "transfer" && isActive(x) && x.data.destination === lane.destination).reduce((s, x) => {
+        const days = x.status === "booked" ? alloc.get(x.id)?.days || [] : [{ day: x.data.ready, n: x.data.trucks }];
+        return s + days.filter((d) => weekKey(d.day) === week).reduce((a, d) => a + d.n, 0);
+      }, 0);
+    });
+    if (lane.kind === "transfer" && !t.some((n) => n > 0)) continue;
+    rows.push({ lane, room, weeks: weeks.map((week, wk) => {
+      const diff = lane.kind === "transfer" ? Math.max(0, t[wk] - room) : t[wk] - room;
+      const chg = Math.abs(diff) / room;
+      const fixed = items.filter((x) => x.type === "room" && x.data.lane === lane.key && x.data.week === week).reduce((s, x) => s + x.data.n, 0);
+      const zone = !diff || chg <= RULES.watchBand ? "G" : chg <= RULES.actBand ? "Y" : "R";
+      const open = zone === "G" ? 0 : Math.max(0, Math.abs(diff) - (Math.sign(fixed) === Math.sign(diff) ? Math.abs(fixed) : 0));
+      return { week, wk, trucks: t[wk], diff, fixed, zone: zone !== "G" && !open ? "C" : zone, open };
+    }) });
+  }
+  return rows;
+}
+// Logistics' to-do: every week still yellow or red, soonest first.
+export const warnings = (items, now) => earlyWarning(items, now)
+  .flatMap((r) => r.weeks.filter((w) => w.open).map((w) => ({ lane: r.lane, room: r.room, ...w })))
+  .sort((a, b) => a.wk - b.wk || (b.zone === "R") - (a.zone === "R"));
 
 // ---------- Transfers: one batch vs paced waves ----------
 // One batch: every truck tendered for the ready day. Paced: fill each day from the ready day on with whatever the

@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=45";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=45";
+import * as E from "./engine.js?v=46";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=46";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -64,11 +64,13 @@ const fits = (r) => {
   if (r.type === "order") return !!SIM_CUSTOMERS[d.customer] && /^\d{4}-\d\d-\d\d$/.test(d.date || "") && Number.isFinite(d.trucks);
   if (r.type === "transfer") return !!E.laneOf("transfer", d.destination) && /^\d{4}-\d\d-\d\d$/.test(d.ready || "") && Number.isFinite(d.trucks);
   if (r.type === "forecast") return !!SIM_CUSTOMERS[d.customer] && /^\d{4}-\d\d-\d\d$/.test(d.week || "");
+  if (r.type === "room") return PILOT_LANES.some((l) => l.key === d.lane) && /^\d{4}-\d\d-\d\d$/.test(d.week || "") && Number.isFinite(d.n);
   return false;
 };
 function withForecasts(store) {
-  const out = (r) => (r.type === "ask" && r.data?.kind === "forecast" ? { ...r, type: "forecast" } : r);
-  const inn = (r) => (r.type === "forecast" ? { ...r, type: "ask", status: "noted", data: { ...r.data, kind: "forecast" } } : r);
+  // Forecasts and extra trucks are stored as noted asks (the table's types predate them).
+  const out = (r) => (r.type === "ask" && ["forecast", "room"].includes(r.data?.kind) ? { ...r, type: r.data.kind } : r);
+  const inn = (r) => (["forecast", "room"].includes(r.type) ? { ...r, type: "ask", status: "noted", data: { ...r.data, kind: r.type } } : r);
   return { ...store, list: async () => (await store.list()).map(out).filter(fits), add: async (row) => out(await store.add(inn(row))) };
 }
 
@@ -527,6 +529,19 @@ function calendarView(store, state) {
       if (v) { view = v.dataset.view; return live(state.items); }
       if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
       if (e.target.closest("#all-lanes")) { showAll = !showAll; return live(state.items); }
+      const ew = e.target.closest("button[data-ew]");
+      if (ew) {
+        if (state.dept !== "logistics") return toast("Switch to Logistics to line up trucks.", true);
+        const [lane, week] = ew.dataset.ew.split("@"), n = +ew.dataset.n;
+        const carrier = n > 0 ? $(`select[data-ewcar="${ew.dataset.ew}"]`).value : "All carriers";
+        ew.disabled = true;
+        try {
+          await store.add({ type: "room", data: { lane, week, carrier, n, on: NOW } });
+          toast(n > 0 ? `Lined up: ${carrier} +${n}, week of ${fmtShort(week)}.` : `Told carriers: ${-n} fewer, week of ${fmtShort(week)}.`);
+          state.refresh();
+        } catch (err) { toast("Couldn't save: " + err.message, true); ew.disabled = false; }
+        return;
+      }
       const b = e.target.closest("button[data-book], button[data-bookall], button[data-bookitem]");
       if (!b) return;
       if (state.dept !== "logistics") return toast("Switch to Logistics to book.", true);
@@ -582,13 +597,23 @@ function calendarView(store, state) {
           ${!isLog && c.toBook ? `<p class="small">Logistics books this.</p>` : ""}`;
       }
     }
+    // Early warning: weeks ahead that don't fit the routing guide. Logistics lines up extra trucks (or tells carriers fewer).
+    const warn = E.warnings(items, NOW);
+    const heads = warn.length ? `<h2>Early warning</h2><div class="ew-list">${warn.map((w) => {
+      const id = `${w.lane.key}@${w.week}`;
+      return `<div class="ew-row ew-${w.zone}"><span class="row-top"><strong>${esc(w.lane.kind === "order" ? custName(w.lane.destination) : w.lane.destination.split(",")[0])}</strong><span>week of ${esc(fmtShort(w.week))}</span></span>
+        <span class="row-sub">${plural(w.trucks, "truck")} · room for ${w.room}</span>
+        ${!isLog ? "" : w.diff > 0 ? `<span class="ew-fix"><select aria-label="Carrier" data-ewcar="${esc(id)}">${w.lane.routing.map((c) => `<option value="${esc(c.name)}">${esc(c.short)}</option>`).join("")}</select>
+          <button type="button" class="util small" data-ew="${esc(id)}" data-n="${w.open}">Add ${w.open}</button></span>`
+          : `<span class="ew-fix"><button type="button" class="util small" data-ew="${esc(id)}" data-n="${-w.open}">Tell carriers −${w.open}</button></span>`}</div>`; }).join("")}</div>
+      ${isLog ? "" : `<p class="small">Logistics lines these up.</p>`}` : "";
     // What to book: one row per order or transfer, soonest first, each with Book; Book all at the bottom.
     const list = E.toBookItems(items, NOW);
-    if (!list.length) return `<h2>To book</h2><p class="empty">All booked.</p>`;
+    if (!list.length) return `${heads}<h2>To book</h2><p class="empty">All booked.</p>`;
     const name = (x) => (x.it.type === "order" ? `${E.poNumber(items, x.it)} ${custName(x.lane.destination)}` : x.lane.destination.split(",")[0]);
     const when = (x) => (x.it.type === "transfer" ? "Prebuild · " : "") + (x.first === x.last ? `${dow(x.first)} ${fmtShort(x.first)}`
       : E.atNoon(x.first).getMonth() === E.atNoon(x.last).getMonth() ? `${fmtShort(x.first)}–${E.atNoon(x.last).getDate()}` : `${fmtShort(x.first)}–${fmtShort(x.last)}`);
-    return `<h2>To book</h2><ul class="tobook">${list.map((x) => `<li class="tb-row">
+    return `${heads}<h2>To book</h2><ul class="tobook">${list.map((x) => `<li class="tb-row">
         <button type="button" class="row" data-cell="${esc(x.lane.key)}@${x.first}">
           <span class="row-top"><strong>${esc(name(x))}</strong><span class="by${E.daysBetween(NOW, x.bookBy) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(x.bookBy))}</span></span>
           <span class="row-sub">${esc(when(x))}</span>
@@ -711,7 +736,8 @@ function shorttermView(store, state) {
   const lanes = PILOT_LANES.filter((l) => l.kind === "transfer");
   const form = { destination: "Findlay, OH", trucks: 12, ready: E.addDays(E.weekKey(NOW), 8) };
   const html = `<div class="cols cols-st">
-    <section class="panel"><h1>Next 6 weeks</h1><span class="legend st-legend">Truckloads · forecast moved <span class="z z-Y">10–25%</span><span class="z z-R">25%+</span></span><div id="st-fc"></div></section>
+    <section class="panel"><h1>Next 6 weeks</h1><span class="legend st-legend">Truckloads vs. carrier room <span class="z z-Y">10–25% off</span><span class="z z-R">25%+ off</span><span class="z z-C">Covered</span></span><div id="st-fc"></div>
+      <p class="small">Yellow and red go to Logistics.</p></section>
     <section class="panel">
       <h2>Prebuild</h2>
       <label class="field"><span class="label">To warehouse</span><select id="pb-dest" aria-label="Warehouse">${lanes.map((l) => `<option>${esc(l.destination)}</option>`).join("")}</select></label>
@@ -740,11 +766,11 @@ function shorttermView(store, state) {
   }
   function live(items) {
     const weeks = Array.from({ length: RULES.weeks }, (_, wk) => E.addDays(E.weekKey(NOW), wk * 7));
+    const ew = E.earlyWarning(items, NOW);
+    const name = (l) => (l.kind === "order" ? custName(l.destination) : `Prebuild · ${l.destination.split(",")[0]}`);
     $("#st-fc").innerHTML = `<table class="tbl st"><thead><tr><th></th>${weeks.map((w, i) => `<th>${i ? esc(fmtShort(w)) : "This week"}</th>`).join("")}</tr></thead><tbody>
-      ${Object.entries(SIM_CUSTOMERS).map(([c, x]) => `<tr><th scope="row">${esc(x.name)}</th>${weeks.map((_, wk) => {
-        const v = E.forecastVersions(items, c, wk, NOW), base = v[0].trucks, latest = v.at(-1).trucks, z = E.zoneOf(base, latest);
-        return `<td>${latest}${latest !== base ? `<span class="z z-${z}">${latest > base ? "+" : "−"}${Math.abs(latest - base)}</span>` : ""}</td>`;
-      }).join("")}</tr>`).join("")}
+      ${ew.map((r) => `<tr><th scope="row">${esc(name(r.lane))}<span class="city">room ${r.room}/wk</span></th>${r.weeks.map((w) =>
+        `<td class="ew ew-${w.zone}">${w.trucks}${w.zone !== "G" ? `<span class="z z-${w.zone}">${w.zone === "C" ? "covered" : `${w.diff > 0 ? "+" : "−"}${Math.abs(w.diff)}`}</span>` : ""}</td>`).join("")}</tr>`).join("")}
       <tr class="st-tot"><th scope="row">All customers</th>${weeks.map((_, wk) => `<td>${Object.keys(SIM_CUSTOMERS).reduce((s, c) => s + E.latestForecast(items, c, wk, NOW), 0)}</td>`).join("")}</tr>
       <tr class="st-tot"><th scope="row">Line time</th>${weeks.map((_, wk) => `<td>${E.SIM_LINE_TIME[wk] + E.plannedLine(items, wk, NOW)}</td>`).join("")}</tr></tbody></table>`;
     const pbs = items.filter((x) => x.type === "transfer").reverse();
@@ -928,7 +954,7 @@ async function main() {
     // Hubs across the top (with what's waiting on each); the hub's own tabs underneath.
     const waiting = (d) => (TEAMS.includes(d) ? orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[d]).length : 0);
     const tabCount = (d, t) => (t === "orders" ? waiting(d) : d !== "logistics" ? 0
-      : t === "calendar" ? E.toBookItems(items, NOW).length : t === "transfers" ? items.filter((x) => x.type === "transfer" && x.status === "waiting").length : 0);
+      : t === "calendar" ? E.toBookItems(items, NOW).length + E.warnings(items, NOW).length : t === "transfers" ? items.filter((x) => x.type === "transfer" && x.status === "waiting").length : 0);
     const hubCount = (d) => Object.keys(HUBS[d].tabs).reduce((s, t) => s + tabCount(d, t), 0);
     const badge = (n) => (n ? ` <span class="count">${n}</span>` : "");
     $("#nav").innerHTML = Object.entries(HUBS).map(([d, h]) =>

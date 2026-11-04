@@ -419,3 +419,15 @@ a.x-name .ic { margin: 0 0 0 4px; width: .9em; }
 .m-chk { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); border: 0; outline: 1.5px dashed var(--muted); outline-offset: -1.5px; box-shadow: none; }
 .m-load.c-pick { outline: 2px solid var(--ink); outline-offset: 1px; }
 .cal-head [hidden] { display: none !important; }
+
+/* Early warning: Planning's forecast vs carrier room, Logistics' to-do */
+.z-C { background: var(--lteal); color: var(--navy); }
+.tbl.st td.ew-Y { background: #fbf3dc; }
+.tbl.st td.ew-R { background: var(--red-bg); }
+.tbl.st td.ew-C { background: #e6f2f1; }
+.ew-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 22px; }
+.ew-row { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--cream); border-left: 4px solid #e0a526; }
+.ew-row.ew-R { border-left-color: var(--red); }
+.ew-row .row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.ew-fix { display: flex; gap: 6px; margin-top: 4px; }
+.ew-fix select { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line, #ddd); background: var(--white); }

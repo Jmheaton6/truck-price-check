@@ -156,7 +156,7 @@ test("calendar and To book: accepted trucks to book; checking ones apart; foreca
   const b = po(COKE, 1, "2026-11-20");
   const row = E.calendar([a, b], NOW, 2).find((r) => r.lane.destination === COKE);
   assert.deepEqual([row.cells[4].contract, row.cells[4].toBook, row.cells[5].checking], [3, 3, 1]);
-  assert.equal(row.expected, 6 - 4);
+  assert.equal(row.expected, 5 - 4);
   assert.equal(row.perDay, 3);
   const list = E.toBookItems([a, b], NOW);
   assert.deepEqual([list.length, list[0].bookBy], [1, "2026-11-16"]);
@@ -203,4 +203,29 @@ test("scorecards", () => {
 test("PO numbers follow arrival order; a change shows its PO's number", () => {
   const a = po(COKE, 2, "2026-11-19"), b = po(PEPSI, 2, "2026-11-19"), ch = change(a, 1);
   assert.deepEqual([a, b, ch].map((x) => E.poNumber([a, b, ch], x)), ["PO-1001", "PO-1002", "PO-1001"]);
+});
+
+test("early warning: a promo forecast over the routing guide turns red; extra trucks cover it and really carry loads", () => {
+  const lane = E.laneOf("order", COKE), week = "2026-11-29"; // week 4; Coca-Cola's routing guide holds 5 a week
+  const fc = { id: "f1", type: "forecast", created_at: ts(), data: { customer: COKE, week, trucks: 7, on: NOW } };
+  const row = (items) => E.earlyWarning(items, NOW).find((r) => r.lane === lane);
+  assert.deepEqual(row([]).weeks.map((w) => w.zone), ["G", "G", "G", "G", "G", "G"]);
+  assert.deepEqual(((w) => [w.trucks, w.diff, w.zone, w.open])(row([fc]).weeks[4]), [7, 2, "R", 2]);
+  assert.equal(E.warnings([fc], NOW).length, 1);
+  const room = { id: "r1", type: "room", created_at: ts(), data: { lane: lane.key, week, carrier: "C.H. Robinson", n: 2, on: NOW } };
+  assert.deepEqual(((w) => [w.zone, w.open])(row([fc, room]).weeks[4]), ["C", 0]);
+  assert.equal(E.warnings([fc, room], NOW).length, 0);
+  // The promo order: 7 trucks over the week. Without the extra trucks 2 wait on a counteroffer; with them, all contract.
+  const orders = ["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03"].map((d, i) => allAccept([], po(COKE, i < 3 ? 2 : 1, d)));
+  const sum = (items) => orders.reduce((s, o) => ((g) => [s[0] + g[0], s[1] + g[2]])(got(items, o)), [0, 0]); // [contract, counter]
+  assert.deepEqual(sum(orders), [5, 2]);
+  assert.deepEqual(sum([...orders, room]), [7, 0]);
+});
+
+test("early warning: warehouse lanes show only with a prebuild, and flag only increases", () => {
+  assert.equal(E.earlyWarning([], NOW).filter((r) => r.lane.kind === "transfer").length, 0);
+  const big = prebuild("Saint Louis, MO", 12, "2026-11-16");
+  const r = E.earlyWarning([big], NOW).find((x) => x.lane.destination === "Saint Louis, MO");
+  assert.deepEqual(((w) => [w.trucks, w.zone])(r.weeks[2]), [12, "R"]);
+  assert.deepEqual(r.weeks.filter((w) => w.wk !== 2).map((w) => w.zone), ["G", "G", "G", "G", "G"]);
 });
