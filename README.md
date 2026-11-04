@@ -1,41 +1,70 @@
-# Ball Findlay pilot: order to truck
+# Ball Monticello pilot: forecast to truck
 
-A customer orders. Ball's four departments accept or deny. Logistics books the trucks from a calendar. Transfers get planned so they fit on contract trucks. The executive sees how each department is doing and what the pilot saved. Built for the Ball case competition (Section 1, Team 2).
+Customers order and share forecasts. Ball's four teams (Sales, Inventory, Planning, Logistics) each check an order. Logistics tenders every load down the lane's routing guide (primary, then 2 backups). If no carrier has room, the customer gets a counteroffer date, and spot is the last resort: if they keep their date, they pay the spot premium as an expedite fee. Planning's prebuilds go to Logistics, which ships them in paced waves instead of one batch. Built for the Ball case competition (Section 1, Team 2).
 
 Live: https://jmheaton6.github.io/truck-price-check/
 
-## Screens
-**Customer HQ** (`?role=customer`): pick your company (top right): Coca-Cola, PepsiCo, AB InBev or Molson Coors. **Order:** new order (cans in millions, delivery date) and My forecast (next 6 weeks; Share forecast sends Ball a new version). **My POs** (`&tab=pos`): Open POs with status and Change (opens on the card); Change requests with status; "Try [date]" when Ball can't do the date asked.
+## The flow
+```
+WEEKS AHEAD: the forecast flow
+  Customer HQ ──forecast + promos──────────▶ Planning · Short-term (truckloads per week)
+  Planning · Long-term ──yearly plan───────▶ Planning · Short-term
+  Planning · Short-term ──prebuild─────────▶ Logistics · Transfers
+        (warehouse, truckloads, ready date)
+  Logistics · Transfers ──paced waves, 3+ days ahead──▶ Carriers
+  Planning · Short-term ──forecast loads───▶ Logistics · Lanes ("N more expected")
 
-**Ball HQ**: one hub per department across the top; each hub has its own tabs. Anyone can open any hub; the hub you're in is the department you answer as. Link: `?hub=<hub>&role=<tab>`.
+ORDERS: a PO or a change
+  Customer HQ ──PO / change──▶ the four teams check it at the same time
+      Sales ........ forecast fit, 3-day fence, price tag (profit per truck), reliability
+      Inventory .... labeled stock, stranded cans on a cut
+      Planning ..... line time that week, production freeze
+      Logistics .... routing guide: primary (3+ days' notice) → backup 1 → backup 2
+  All 4 accept ──▶ Logistics books it on Lanes
+  No carrier has room ──▶ Logistics: Counteroffer [date] ──▶ Customer HQ
+      Take the date ──▶ contract
+      Keep their date ──▶ spot + expedite fee (the lane's spot premium) on their PO
+      (no date in 2 weeks works: "Offer spot"; they keep their date and pay, or cancel)
+  Sales, Inventory or Planning denies ──▶ customer sees why + "Try [date]"
+
+EXECUTIVE: Saved vs the old weekly batches · spot % vs the 8% goal · what's waiting on each hub
+```
+
+## Screens
+**Customer HQ** (`?role=customer`): pick your company (top right). **Order:** new order (cans in millions, delivery date), your reliability score, and My forecast (6 weeks; Share forecast). **My POs** (`&tab=pos`): Open POs and Change requests, with status, Change (opens on the card), counteroffers (Take the date / Keep yours + fee), and Try [date] after a deny.
+
+**Ball HQ**: one hub per team across the top; anyone can open any hub, and the hub you're in is the team you answer as. Link: `?hub=<hub>&role=<tab>`.
 | Hub | Tabs |
 |---|---|
-| Sales | Orders (accept or deny), Outlook (read only) |
-| Inventory | Orders, Stock (labeled cans per customer: in stock, promised, checking, left, stranded) |
-| Production | Orders, Line time (next 6 weeks: accepted, checking, open; frozen weeks marked) |
-| Logistics | Orders, Outlook (pre-book forecast trucks; Book all; Release), Trucks (calendar + To book), Transfers (warehouse, truckloads, ship date → contract or spot, book-by) |
-| Executive | Dashboard: Saved, Spot spent, spot share (old way vs now vs 8% goal), where savings came from, one card per hub with what's waiting (click to open the hub) |
+| Sales | Orders (check; price tag; reliability) · Customers (reliability per customer; 90%+ = Priority) |
+| Inventory | Orders · Stock (labeled cans per customer) |
+| Planning | Orders (line time / freeze) · Short-term (6-week customer forecasts + Prebuild) · Long-term (12 months: real 2025/2026 loads, 2026 plan = 2025 + 2%) · Line time |
+| Logistics | Orders (routing guide; Counteroffer) · Lanes (calendar: loads per day, carriers per load, routing guide, To book) · Transfers (prebuilds: one batch vs paced waves; Schedule) |
+| Executive | Saved, spot Ball paid, expedite fees billed, spot share (old way vs now vs 8%), where savings came from, one card per hub |
 
-Old links still work (`?role=review` → Orders, `?role=schedule` → Trucks, `?role=dashboard` → Executive, `?role=sales` → Orders as Sales). QR codes: `Case Comp/QR codes/`.
-
-Flags: `&today=2026-11-05` rehearses a date (the banner's date picker moves it, e.g. to show a late order); `&local` is backup mode (this laptop only, no database).
+Old links still work (`?role=review|schedule|dashboard|sales|production|outlook`). Flags: `&today=2026-11-05` rehearses a date (the banner's date picker moves it); `&local` = backup mode (this laptop only).
 
 ## The rules (all in `engine.js`)
-- **The 3-day rule:** a truck booked 3+ days before it moves is a contract truck, however many there are. Inside 3 days it's spot.
-- **Pre-booking:** nothing is lined up by default. On Outlook, Logistics books a customer's forecast trucks 3+ days before the week; a late order that week rides those (first come, first served) instead of going spot. Outlook lists weeks whose book-by date is within a week, plus any week whose forecast moved.
-- **Forecast:** the baseline (what the carrier plan is sized for) never changes; each update is a new version and the latest one counts. Orders consume the forecast: a week needs the larger of the two, not the sum. Sales checks against the latest forecast. Told 2+ weeks before the week starts, Production plans the extra line time.
-- **Spot cost** = the lane's spot premium per spot truck (2026 data).
-- **Saved** = spot cost the old way minus spot cost now, on the pilot's own orders and transfers. The old way: the same freight, plus every order accepted as first asked, moving at each lane's actual 2026 spot rate (Ball's workbook). Split into customer orders and transfers.
-- **Scorecards:** Sales, time to answer customers. Inventory, truckloads stranded. Production, line time used. Logistics, spot share and share booked 3+ days ahead.
+- **Routing guide** (real, workbook): each Monticello lane's top 3 contract carriers by 2026 contract loads. A carrier's weekly commitment = its 2026 contract loads on the lane ÷ 30.3 weeks, rounded up; daily share = weekly ÷ 7, rounded up. A contract carrier named "Spot Freight" is left out so no one confuses it with spot.
+- **Tender:** each load goes to the primary (only with 3+ days' notice), then backup 1, then backup 2, each up to its daily share and what's left of its weekly commitment. Booked loads hold their trucks; the rest go in line with Priority customers first, then first come, first served.
+- **Short:** a customer order gets a counteroffer, the nearest date (±2 weeks) where every check passes and every truck is on contract. Kept date = spot, and the customer pays the lane's spot premium per spot truck. A prebuild shipped in one batch goes spot for whatever doesn't fit.
+- **Paced waves:** a prebuild is spread day by day from its ready date (3+ days out, so the primary can take it), as many per day as the routing guide still has room for.
+- **Checks:** Sales: 3+ days out, the week within 10% of the latest forecast. Inventory: labeled stock; a cut inside the freeze strands cans. Planning: line time that week and the freeze (warned 2+ weeks ahead, Planning adds line time). Logistics: the routing guide covers it.
+- **Price tag:** profit per truck = $3,100 minus the spot premium Ball would pay, spread over the order's trucks.
+- **Reliability:** orders placed and kept outside the 3-day fence ÷ all orders (simulated history + live). 90%+ = Priority.
+- **Saved** = spot cost the old way minus spot cost now, on the pilot's accepted orders and scheduled prebuilds. The old way (case): orders released in Thursday batches and shipped Fri–Sun with 1–3 days' notice (so the primary can't take them), orders as first asked, prebuilds in one batch the day they're ready; whatever the routing guide can't cover goes spot, and Ball pays.
+- **Spot cost** = the lane's spot premium per spot truck (pure-spot vs pure-contract cost per load on the lane, 2026).
 
-**Real** (Ball's 2026 workbook, Findlay, no shuttles): lanes, weekly averages, spot premiums. **Simulated** (stated as assumptions): customer names (illustrative; the case data has no customer names), Ball's other business on each lane, customer forecasts, stock, line time.
+**Real** (Ball's 2026 workbook, Monticello, no shuttles): lanes, routing guides and commitments, spot premiums, monthly loads. **Simulated** (stated as assumptions): customer names (illustrative), forecasts, stock, line time, reliability history.
 
 ## Setup
 1. Supabase: `supabase/update-3.sql` (the `items` table and `reset_items`). Nothing newer is needed.
 2. `config.js` holds the project URL and publishable key.
-3. GitHub Pages serves `main`. Bump `?v=` in `index.html` and the imports at the top of `app.js` after every change.
-4. Clear test data: Executive → Clear all data → PIN.
+3. Lanes: `python -I scripts/build_lanes.py "<workbook>.xlsx" lanes.js "MONTICELLO, IN"`.
+4. GitHub Pages serves `main`. Bump `?v=` in `index.html` and the imports at the top of `app.js` after every change.
+5. Clear test data: Executive → Clear all data → PIN.
 
 ## Tests
 - `node --test tests/engine.test.mjs`: the rules.
-- `node tests/personas.mjs` (with `python3 -m http.server 8765` running here): a bot plays a customer and each department through a full day using only what's on screen, grades every screen for simplicity, and writes `tests/persona-report.md` and `tests/persona-shots/`.
+- `node tests/personas.mjs` (with `python3 -m http.server 8765` running here): a bot plays customers and each team through the demo day using only what's on screen, grades every screen for simplicity, and writes `tests/persona-report.md` and `tests/persona-shots/`.
+- `node tests/deck-shots.mjs`: 16 clean demo screenshots to `Case Comp/Deck screenshots/`.
