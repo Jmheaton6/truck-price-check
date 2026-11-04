@@ -126,6 +126,34 @@ test("PO numbers follow arrival order; a change shows its PO's number", () => {
   assert.equal(E.poNumber(items, ch), "PO-1001");
 });
 
+test("teams can change answers: forwards to accepted, backwards to review, locked once booked", () => {
+  const who = (team) => ({ name: "Pat", team });
+  let p = po("Cincinnati, OH", 2, "2026-11-19");
+  const step = (team, ok) => { const u = E.applySign(p, team, ok, who(team), ts()); if (u) p = { ...p, status: u.status, data: u.data }; return u; };
+  for (const t of ["sales", "inventory", "production"]) step(t, true);
+  assert.equal(E.stageOf(p), "review");
+  step("logistics", true);
+  assert.equal(E.stageOf(p), "accepted");            // the fourth Approve accepts it
+  assert.equal(step("logistics", true), null);       // same answer again: nothing to save
+  step("production", false);
+  assert.equal(E.stageOf(p), "review");              // a new Reject sends it back
+  assert.equal(p.data.answer, null);
+  step("production", true);
+  assert.equal(E.stageOf(p), "accepted");            // and it can come forward again
+  assert.ok(p.data.log.some((e) => e.ev.startsWith("Back in review")));
+  p = { ...p, data: { ...p.data, scheduled_at: ts() } };
+  assert.equal(E.stageOf(p), "booked");
+  assert.equal(step("sales", false), null);          // locked once trucks are booked
+});
+
+test("the history log keeps the first entry and the latest ones", () => {
+  let d = {};
+  for (let i = 0; i < 40; i++) d = E.withLog(d, { ev: "e" + i });
+  assert.equal(d.log.length, E.LOG_MAX);
+  assert.equal(d.log[0].ev, "e0");
+  assert.equal(d.log.at(-1).ev, "e39");
+});
+
 test("money: a contract customer truck keeps $3,100; spot loses the premium", () => {
   const lane = E.laneOf("order", "Downey, CA");
   const m = E.splitMoney(lane, 1, 1);

@@ -352,6 +352,44 @@ export function review(items, it, now) {
   return { checks: c, signed, approved, refused, allApproved: approved === TEAMS.length };
 }
 
+// ---------- Where a PO stands, and how a team's answer moves it ----------
+// review → (offered ⇄ customer) → accepted → booked, or declined. Teams can change their answer any time
+// until the trucks are booked: a new Reject sends an accepted PO back to review; the fourth Approve accepts it.
+export const STAGES = { review: "In review", offered: "Counteroffer out", accepted: "Accepted", booked: "Booked", declined: "Declined" };
+export const stageOf = (it) =>
+  it.status === "declined" ? "declined" : it.status === "offered" ? "offered"
+  : it.status === "confirmed" ? (it.data.scheduled_at ? "booked" : "accepted") : "review";
+export const answersOpen = (it) => stageOf(it) === "review" || stageOf(it) === "accepted";
+
+// History lives on the item: [{ at, by, tm, ev, cust? }]. cust = what the customer sees (if anything).
+export const LOG_MAX = 24;
+export function withLog(data, ...entries) {
+  const log = [...(data.log || []), ...entries];
+  return { ...data, log: log.length > LOG_MAX ? [log[0], ...log.slice(-(LOG_MAX - 1))] : log };
+}
+
+const TEAM_LABEL = { sales: "Sales", inventory: "Inventory", production: "Production", logistics: "Logistics" };
+// who = { name, team }. Returns the update to save, or null if answers are locked.
+export function applySign(it, team, ok, who, at) {
+  if (!answersOpen(it)) return null;
+  const before = it.data.signoffs?.[team];
+  if (before && before.ok === ok) return null;
+  const signoffs = { ...(it.data.signoffs || {}), [team]: { ok, at, by: who.name } };
+  const all = TEAMS.every((t) => signoffs[t]?.ok === true);
+  const entry = { at, by: who.name, tm: team, ev: before ? `Changed ${TEAM_LABEL[team]}'s answer to ${ok ? "Approve" : "Reject"}` : `${TEAM_LABEL[team]} ${ok ? "approved" : "rejected"}` };
+  const stage = stageOf(it);
+  let status = it.status, answer = it.data.answer ?? null, sys = null;
+  if (stage === "accepted" && !ok) {
+    status = "waiting"; answer = null;
+    sys = { at, by: "Ball HQ", tm: "system", ev: "Back in review: a team changed its answer", cust: "Ball is re-checking this order" };
+  } else if (stage === "review" && all) {
+    status = "confirmed"; answer = { kind: "accepted", at };
+    sys = { at, by: "Ball HQ", tm: "system", ev: "All four teams approved: accepted", cust: "Accepted by Ball" };
+  }
+  const data = withLog({ ...it.data, signoffs, answer }, entry, ...(sys ? [sys] : []));
+  return { status, data, event: sys ? sys.ev : entry.ev };
+}
+
 // The best other date (within 2 weeks either side, 5+ days out, inside the horizon) that makes more profit
 // and that Production can make. Ties go to the closest date.
 export function betterDate(items, it, now) {
