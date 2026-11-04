@@ -16,56 +16,50 @@ const b = await chromium.launch();
 const p = await (await b.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 })).newPage();
 const go = async (q) => { await p.goto(BASE + q); await p.addStyleTag({ content: "#mode-banner{display:none!important}.toast{display:none!important}#x-reset{display:none!important}" }); await p.waitForTimeout(600); };
 const shot = (name) => p.screenshot({ path: join(OUT, `${name}.png`) });
-const dept = async (d) => { await p.locator("#nav a", { hasText: d }).first().click(); await p.waitForTimeout(500); };
 const btn = async (name, exact = true) => { await p.getByRole("button", { name, exact }).first().click(); await p.waitForTimeout(450); };
 const bookAll = async () => { const all = p.getByRole("button", { name: /^Book all/ }); if (await all.count()) await all.first().click(); else await p.getByRole("button", { name: "Book", exact: true }).first().click(); await p.waitForTimeout(450); };
-const answerAll = async () => { for (const d of ["Sales", "Inventory", "Production", "Logistics"]) { await go("?role=orders" + Q); await dept(d); const bad = await p.locator(".d-mine .d-check.bad").count(); await btn(bad ? "Deny" : "Accept"); } };
+const hub = async (h, tab, extra = "") => { await go(`?hub=${h}&role=${tab}${extra}` + Q); };
+const accept = async (h) => { await hub(h, "orders"); await btn("Accept"); };
 
 await go("?" + Q.slice(1)); await p.evaluate(() => localStorage.clear());
 await go("?" + Q.slice(1)); await shot("01 Home");
 
-// 1. Customer orders
+// 1. Weeks ahead: Coca-Cola shares a promo forecast; Planning sends Logistics a prebuild
 await go("?role=customer" + Q);
-await p.fill("#c-date", "2026-11-19"); await p.dispatchEvent("#c-date", "change");
-await shot("02 Customer HQ - new order");
+await p.fill('[data-fw="4"]', "1.4"); await p.dispatchEvent('[data-fw="4"]', "input");
+await shot("02 Customer HQ - forecast and order"); await btn("Share forecast");
+await hub("planning", "shortterm"); await shot("03 Planning - short-term forecast and prebuild");
+await btn("Send to Logistics");
+
+// 2. Logistics paces the prebuild: one batch vs paced waves
+await hub("logistics", "transfers"); await shot("04 Logistics - prebuild one batch vs paced");
+await btn("Schedule");
+
+// 3. Coca-Cola orders; the four teams check it
+await go("?role=customer" + Q);
+await p.fill("#c-m", "0.6"); await p.dispatchEvent("#c-m", "input"); await p.fill("#c-date", "2026-11-19"); await p.dispatchEvent("#c-date", "change");
 await btn("Send order");
-await go("?role=customer&tab=pos" + Q); await shot("03 Customer HQ - order checking");
+await hub("sales", "orders"); await shot("05 Sales - check with price tag and reliability"); await btn("Accept");
+await accept("inventory"); await accept("planning");
+await hub("logistics", "orders"); await shot("06 Logistics - routing guide check"); await btn("Accept");
+await hub("logistics", "calendar", "&week=2"); await shot("07 Logistics - lanes calendar to book");
+await btn("Book");
 
-// 2. Departments check off
-await go("?role=orders" + Q); await dept("Sales"); await shot("04 Orders - Sales checks");
-await btn("Accept");
-for (const d of ["Inventory", "Production"]) { await go("?role=orders" + Q); await dept(d); await btn("Accept"); }
-await go("?role=orders" + Q); await dept("Logistics"); await shot("05 Orders - Logistics last check");
-await btn("Accept"); await shot("06 Orders - all four accepted");
+// 4. A late change doesn't fit the routing guide: counteroffer, not spot
+await go("?role=customer&tab=pos" + Q); await btn("Change"); await p.fill("#e-m", "1"); await p.dispatchEvent("#e-m", "input");
+await shot("08 Customer HQ - change request"); await btn("Send change");
+await accept("sales"); await accept("inventory"); await accept("planning");
+await hub("logistics", "orders"); await shot("09 Logistics - no carrier has room");
+await p.getByRole("button", { name: /^Counteroffer/ }).first().click(); await p.waitForTimeout(450);
+await go("?role=customer&tab=pos" + Q); await shot("10 Customer HQ - counteroffer or expedite");
+await p.getByRole("button", { name: /^Take / }).first().click(); await p.waitForTimeout(450);
+await hub("logistics", "calendar", "&week=2"); await shot("11 Logistics - lanes after counteroffer");
 
-// 3. Logistics books from the calendar
-await go("?role=calendar&week=2" + Q); await dept("Logistics"); await shot("07 Trucks - to book");
-await btn("Book"); await shot("08 Trucks - booked");
-
-// 4. Customer changes demand; the check-off catches it
-await go("?role=customer&tab=pos" + Q); await btn("Change"); await p.fill("#e-m", "2.8"); await p.dispatchEvent("#e-m", "input");
-await shot("09 Customer HQ - change request");
-await btn("Send change");
-await go("?role=orders" + Q); await dept("Production"); await shot("10 Orders - change fails checks");
-await btn("Deny");
-await go("?role=customer&tab=pos" + Q); await shot("11 Customer HQ - denied, try another date");
-await p.getByRole("button", { name: /^Try / }).first().click(); await p.waitForTimeout(400);
-await answerAll();
-
-// 5. Transfers planned ahead
-await go("?role=transfers" + Q); await dept("Logistics"); await shot("12 Transfers - planned ahead");
-await btn("Put on calendar");
-await go("?role=calendar" + Q); await shot("13 Trucks - transfer on the calendar");
-await bookAll();
-
-// 6. Early warning: Coca-Cola's promo week, pre-booked weeks ahead
-await go("?role=customer" + Q); await p.selectOption("#who-sel", { label: "Coca-Cola" }); await p.waitForTimeout(300);
-await p.fill('[data-fw="4"]', "2.8"); await p.dispatchEvent('[data-fw="4"]', "input"); await btn("Share forecast");
-await go("?role=outlook" + Q); await dept("Logistics"); await shot("14 Outlook - warning");
-await p.getByRole("button", { name: /^Book all/ }).first().click(); await p.waitForTimeout(450);
-await shot("15 Outlook - pre-booked");
-
-// 7. Executive
-await go("?role=exec" + Q); await dept("Executive"); await shot("16 Executive");
+// 5. The rest of Ball HQ
+await hub("sales", "customers"); await shot("12 Sales - customer reliability");
+await hub("inventory", "stock"); await shot("13 Inventory - stock");
+await hub("planning", "longterm"); await shot("14 Planning - long-term");
+await hub("planning", "line"); await shot("15 Planning - line time");
+await hub("exec", "exec"); await shot("16 Executive");
 await b.close();
 console.log("Saved to", OUT);

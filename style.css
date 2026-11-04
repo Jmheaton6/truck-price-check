@@ -357,3 +357,41 @@ a.x-card.x-bad:hover { box-shadow: inset 0 4px 0 var(--red), inset 0 0 0 1.5px v
 .ol-open { font-size: 12px; font-weight: 600; color: var(--muted); }
 .top-cta { margin-bottom: 12px; }
 .x-wait { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--ink); }
+
+/* ---------- Routing guide, counteroffers, planning ---------- */
+.sq-ctr { background: #e0a526; }
+.cal td.c-ctr { background: #f6e7c1; }
+.t-ctr { color: #8a5d00; font-weight: 700; }
+.chip-offered { background: #f6e7c1; color: #7a5a00; }
+.chip-prio { background: var(--teal); color: var(--white); }
+.note-wait { background: #f6e7c1; color: #7a5a00; }
+.offer { margin: 8px 0; font-size: 15px; font-weight: 600; }
+.fee { margin-top: 6px; font-size: 14px; font-weight: 700; color: var(--red); }
+.d-extra { font-size: 14px; color: var(--ink); font-weight: 600; }
+.d-extra .chip { font-size: 12px; }
+.moves li.mv { flex-wrap: wrap; }
+.mv-car { flex-basis: 100%; font-size: 13px; color: var(--muted); }
+.moves.rg li { font-size: 14px; padding: 6px 0; }
+.exp { color: var(--teal); font-weight: 700; }
+.tq-card { margin-bottom: 12px; background: var(--white); border: 1px solid var(--line); }
+.tq-card .options { margin: 10px 0 0; }
+.tq-card .option { grid-template-columns: 120px 1fr auto auto; cursor: default; }
+.op-when { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
+.cols-st { grid-template-columns: 1.6fr 1fr; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tbl.st td { font-size: 20px; text-align: center; }
+.tbl.st thead th { text-align: center; }
+.tbl.st .z { display: block; width: max-content; margin: 2px auto 0; }
+.tbl.st .st-tot th, .tbl.st .st-tot td { color: var(--muted); font-size: 15px; }
+.st-legend { margin: -8px 0 10px; justify-content: flex-start; }
+.pb { margin-top: 16px; }
+.lt { display: grid; grid-template-columns: repeat(12, 1fr); gap: 8px; align-items: end; margin-top: 10px; }
+.lt-m { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; }
+.lt-m b { font-weight: 600; font-size: 12px; color: var(--muted); }
+.lt-bars { display: flex; gap: 3px; align-items: flex-end; height: 220px; width: 100%; justify-content: center; }
+.lt-bars i { display: block; width: 40%; border-radius: 4px 4px 0 0; }
+.lb-2025 { background: var(--line-2); }
+.lb-fc { background: var(--white); box-shadow: inset 0 0 0 2px var(--teal); }
+a.x-name { display: inline-flex; align-items: center; color: var(--ink); text-decoration: none; }
+a.x-name:hover { color: var(--teal); }
+a.x-name .ic { margin: 0 0 0 4px; width: .9em; }

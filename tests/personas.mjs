@@ -85,7 +85,7 @@ async function fill(label, value) {
   const loc = page.getByLabel(label, { exact: false }).first();
   if (!(await loc.count())) { issue(`No field labeled "${label}".`); throw new Error(`no field ${label}`); }
   await loc.fill(String(value));
-  await loc.dispatchEvent(label.match(/deliver|start|ship on/i) ? "change" : "input");
+  await loc.dispatchEvent(label.match(/deliver|start|ship on|ready on/i) ? "change" : "input");
   step(`Typed ${value} in "${label}"`);
   await pause(200);
 }
@@ -121,203 +121,147 @@ const iAm = async (dept) => {
 // ---------------- The day ----------------
 await go("?" + Q.slice(1));
 await page.evaluate(() => localStorage.clear());
+const hub = async (name, tab) => { await iAm(name); if (tab) { await click(tab, { role: "link" }); } };
+const answer = async (dept) => { await go("?role=orders" + Q); await iAm(dept); const bad = await page.locator(".d-mine .d-check.bad").count(); await click(bad ? "Deny" : "Accept", { exact: true }); };
 
-persona("Pat (customer, Coca-Cola buyer)", "customer", "Order 2 million cans for Thu Nov 19, then see if Ball accepted.");
+persona("Pat (customer, Coca-Cola buyer)", "forecast", "Our Nov 29 week has a promo: tell Ball it'll be 1.4 million cans.");
 await task(async () => {
-  await go("?" + Q.slice(1));
   await look("home");
   await click("Customer HQ", { role: "link" });
   await look("customer start");
-  await fill("Million cans", 2);
-  await sees("10 truckloads", "the cans turned into truckloads");
+  await fill("week of Nov 29", 1.4);
+  await click("Share forecast");
+  if (!/shared/i.test(await toastText())) issue("No sign the forecast went to Ball.");
+});
+
+persona("Pia (Planning, short-term forecasting)", "planning", "See what's coming, and send Logistics a prebuild: 12 truckloads to the Findlay warehouse, ready Nov 9.");
+await task(async () => {
+  await go("?role=exec" + Q);
+  await hub("Planning", "Short-term");
+  await look("short-term forecast");
+  await sees("+2", "Coca-Cola's promo week flagged");
+  await pick("Warehouse", "Findlay, OH");
+  await fill("Truckloads", 12);
+  await fill("Ready on", "2026-11-09");
+  await click("Send to Logistics");
+  if (!/sent to logistics/i.test(await toastText())) issue("No sign the prebuild reached Logistics.");
+});
+
+persona("Lee (Logistics)", "transfers", "Schedule the prebuild so it doesn't go spot.");
+await task(async () => {
+  await go("?role=exec" + Q);
+  await hub("Logistics", "Transfers");
+  await look("prebuild to schedule");
+  await sees("One batch"); await sees("Paced waves");
+  await sees("spot", "what one batch would cost");
+  await click("Schedule", { exact: true });
+  if (!/12 on contract/i.test(await toastText())) issue("Paced schedule didn't keep all 12 on contract.");
+});
+
+persona("Pat (customer, Coca-Cola buyer)", "customer", "Order 0.6 million cans for Thu Nov 19, then see where it stands.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await sees("Priority", "that we're a Priority customer");
+  await fill("Million cans", 0.6);
+  await sees("3 truckloads", "the cans turned into truckloads");
   await fill("Deliver on", "2026-11-19");
   await click("Send order");
   if (!/sent/i.test(await toastText())) issue("No clear 'sent' message after sending the order.");
-  if (await page.locator(".card").count()) issue("The Order tab shows PO cards; they belong on My POs.");
   await click("My POs", { role: "link" });
-  await sees("Open POs"); await sees("Change requests");
   await sees("Checking", "the order status");
   await look("order sent");
 });
 
-for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production", "Paolo"]]) {
-  persona(`${who} (${dept})`, dept.toLowerCase(), "Find the new order waiting on me, read my check, and answer it.");
+for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Planning", "Pia"], ["Logistics", "Lee"]]) {
+  persona(`${who} (${dept})`, dept.toLowerCase(), "Find the new order, read my check, answer it.");
   await task(async () => {
     await go("?role=orders" + Q);
     await iAm(dept);
-    await look(`${dept} queue`);
-    await sees("Coca-Cola", "the waiting order");
+    await look(`${dept} check`);
+    if (dept === "Sales") await sees("profit / truck", "the price tag");
+    if (dept === "Logistics") await sees("Dedicated", "which carriers take it");
     await click("Accept", { exact: true });
-    if (!/accept/i.test(await toastText())) issue("No confirmation after Accept.");
-    await sees("Nothing waiting on you", "an empty queue after answering");
   });
 }
-
-persona("Lee (Logistics)", "logistics", "Accept the order, then book its trucks on the calendar, then plan 12 truckloads to Mississauga.");
+persona("Lee (Logistics)", "book", "Book the accepted order's trucks.");
 await task(async () => {
-  await go("?role=orders" + Q);
-  await iAm("Logistics");
-  await click("Accept", { exact: true });
-  if (!/all four/i.test(await toastText())) issue("After the 4th accept, no message that the order went through.");
-  await look("order accepted");
   await click("Book trucks", { role: "link" });
-  await look("calendar");
+  await look("lanes");
   await sees("To book", "a list of what to book");
-  await click("Book", { exact: true });            // the order I just accepted is in "To book"
+  await click("Book", { exact: true });
   if (!/booked/i.test(await toastText())) issue("No confirmation after booking.");
-  await click("Transfers", { role: "link" });
-  await look("transfers");
-  await fill("Truckloads", 12);
-  await sees("12 contract", "all 12 on contract when planned ahead");
-  await sees("Book by", "when I have to book them");
-  await click("Put on calendar");
-  await look("transfer planned");
-});
-await task(async () => {
-  await click("Trucks", { role: "link" });
-  await look("calendar with transfer");
-  const all = page.getByRole("button", { name: /^Book all/ });
-  if (await all.count()) { await click((await all.first().textContent()).trim()); if (!/booked/i.test(await toastText())) issue("No confirmation after Book all."); }
-  else if (await page.getByRole("button", { name: "Book", exact: true }).count()) { await click("Book", { exact: true }); if (!/booked/i.test(await toastText())) issue("No confirmation after Book."); }
-  else issue("Nothing to book, but the transfer wasn't booked.");
-  await look("after book all");
 });
 
-persona("Pat (customer, Coca-Cola buyer)", "customer2", "Promo got bigger: change the order to 2.8 million cans.");
+persona("Pat (customer, Coca-Cola buyer)", "change", "The promo grew: change the Nov 19 order to 1 million cans.");
 await task(async () => {
   await go("?role=customer" + Q);
   await click("My POs", { role: "link" });
   await click("Change");
-  await look("change form");
-  await fill("Million cans", 2.8);
-  await sees("+4", "the change in truckloads");
+  await fill("Million cans", 1);
+  await sees("+2", "the change in truckloads");
   await click("Send change");
 });
-
-for (const [dept, who] of [["Sales", "Sam"], ["Production", "Paolo"]]) {
-  persona(`${who} (${dept})`, `${dept.toLowerCase()}2`, "A change came in. Read my check and answer honestly.");
-  await task(async () => {
-    await go("?role=orders" + Q);
-    await iAm(dept);
-    await look(`${dept} change`);
-    if (await page.getByText("Nothing waiting on you").isVisible().catch(() => false)) { step("Nothing waiting on me: another department already denied it"); return; }
-    const bad = await page.locator(".d-mine .d-check.bad").count();
-    if (bad) { step("My check shows a problem, so I deny it"); await click("Deny", { exact: true }); }
-    else await click("Accept", { exact: true });
-  });
+for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Planning", "Pia"]]) {
+  persona(`${who} (${dept})`, `${dept.toLowerCase()}2`, "A change came in. Read my check and answer.");
+  await task(async () => { await answer(dept); });
 }
-
-persona("Pat (customer, Coca-Cola buyer)", "customer3", "See what happened to my change, and take Ball's other date.");
-await task(async () => {
-  await go("?role=customer" + Q);
-  await click("My POs", { role: "link" });
-  await look("change denied");
-  await sees("Denied", "that the change was denied");
-  const tryBtn = page.getByRole("button", { name: /^Try / }).first();
-  if (await tryBtn.count()) { const name = (await tryBtn.textContent()).trim(); await click(name); }
-  else issue("Denied with no other date to try.");
-  await look("retry sent");
-});
-
-for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production", "Paolo"], ["Logistics", "Lee"]]) {
-  persona(`${who} (${dept})`, `${dept.toLowerCase()}3`, "Answer the customer's new date.");
-  await task(async () => {
-    await go("?role=orders" + Q);
-    await iAm(dept);
-    if (await page.getByText("Nothing waiting on you").isVisible().catch(() => false)) { step("Nothing waiting on me"); return; }
-    const bad = await page.locator(".d-mine .d-check.bad").count();
-    await click(bad ? "Deny" : "Accept", { exact: true });
-  });
-}
-
-persona("Bo (customer, PepsiCo buyer)", "customer4", "Order 1.2 million cans for Wed Nov 25.");
-await task(async () => {
-  await go("?role=customer" + Q);
-  await pick("Company", "PepsiCo");
-  await fill("Million cans", 1.2);
-  await fill("Deliver on", "2026-11-25");
-  await click("Send order");
-});
-for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production", "Paolo"]]) {
-  persona(`${who} (${dept})`, `${dept.toLowerCase()}4`, "Answer the new order.");
-  await task(async () => {
-    await go("?role=orders" + Q);
-    await iAm(dept);
-    const bad = await page.locator(".d-mine .d-check.bad").count();
-    await click(bad ? "Deny" : "Accept", { exact: true });
-  });
-}
-persona("Lee (Logistics)", "logistics4", "Accept the new order; it's 3+ weeks out, so it should all be contract.");
+persona("Lee (Logistics)", "counter", "The change doesn't fit the routing guide. Don't go spot: offer the customer another date.");
 await task(async () => {
   await go("?role=orders" + Q);
   await iAm("Logistics");
-  await look("order 3 weeks out");
-  if (await page.locator(".d-mine .d-check.bad").count()) issue("An order 20 days out shows spot trucks.");
-  await click("Accept", { exact: true });
+  await look("no carrier has room");
+  await sees("No carrier has room", "why it doesn't fit");
+  const co = page.getByRole("button", { name: /^Counteroffer/ });
+  if (!(await co.count())) { issue("No counteroffer button."); throw new Error("no counteroffer"); }
+  await click((await co.first().textContent()).trim());
+  if (!/counteroffer sent/i.test(await toastText())) issue("No sign the counteroffer went out.");
 });
-
-// ---------- Early warning: the customer tells Ball weeks ahead ----------
-persona("Pat (customer, Coca-Cola buyer)", "forecast", "Our Nov 29 week has a promo: tell Ball it'll be 2.8 million cans.");
+persona("Pat (customer, Coca-Cola buyer)", "take", "Ball offered a new date. Take it.");
 await task(async () => {
   await go("?role=customer" + Q);
-  await pick("Company", "Coca-Cola");
-  await look("forecast before");
-  await fill("week of Nov 29", 2.8);
-  await click("Share forecast");
-  if (!/shared/i.test(await toastText())) issue("No sign the forecast went to Ball.");
-});
-persona("Lee (Logistics)", "outlook", "See what's coming in the next 6 weeks and line up trucks early.");
-await task(async () => {
-  await go("?role=outlook" + Q);
-  await iAm("Logistics");
-  await look("outlook with warning");
-  await sees("+75%", "the promo week flagged");
-  const all = page.getByRole("button", { name: /^Book all/ });
-  if (!(await all.count())) { issue("No way to book the forecast trucks ahead."); throw new Error("no book all"); }
-  await click((await all.first().textContent()).trim());
-  if (!/pre-booked/i.test(await toastText())) issue("No confirmation after pre-booking.");
-  await look("outlook covered");
-  await sees("Covered", "the week is covered now");
-});
-persona("Pat (customer, Coca-Cola buyer)", "forecast-po", "Place the promo order: 2.8 million cans for Wed Dec 2.");
-await task(async () => {
-  await go("?role=customer" + Q);
-  await fill("Million cans", 2.8);
-  await fill("Deliver on", "2026-12-02");
-  await click("Send order");
-});
-for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production", "Paolo"], ["Logistics", "Lee"]]) {
-  persona(`${who} (${dept})`, `${dept.toLowerCase()}-fc`, "Answer the promo order Ball was warned about.");
-  await task(async () => {
-    await go("?role=orders" + Q);
-    await iAm(dept);
-    if (await page.locator(".d-mine .d-check.bad").count()) issue(`${dept}'s check fails even though the customer warned Ball 3 weeks ahead.`);
-    await click("Accept", { exact: true });
-  });
-}
-persona("Bo (customer, PepsiCo buyer)", "forecast-down", "Our Nov 15 week is slow: drop it to 0.4 million cans.");
-await task(async () => {
-  await go("?role=customer" + Q);
-  await pick("Company", "PepsiCo");
-  await fill("week of Nov 15", 0.4);
-  await click("Share forecast");
-});
-persona("Lee (Logistics)", "outlook-down", "A customer's demand dropped. Free up the trucks we won't need.");
-await task(async () => {
-  await go("?role=outlook" + Q);
-  await iAm("Logistics");
-  await sees("extra", "trucks no one will need");
-  const rel = page.getByRole("button", { name: /^Release/ });
-  if (!(await rel.count())) { issue("Extra trucks show, but no way to release them."); throw new Error("no release"); }
-  await click((await rel.first().textContent()).trim());
-  await look("after release");
+  await click("My POs", { role: "link" });
+  await look("counteroffer");
+  await sees("Ball can do", "Ball's new date");
+  const take = page.getByRole("button", { name: /^Take / });
+  if (!(await take.count())) { issue("No way to take the new date."); throw new Error("no take"); }
+  await click((await take.first().textContent()).trim());
+  await sees("Accepted", "the change accepted");
 });
 
 // ---------- Harder days ----------
-persona("Cy (customer, AB InBev buyer)", "edge-late", "Rush: order 0.4 million cans for Sat Nov 7 (2 days out).");
+persona("Cy (customer, AB InBev buyer)", "edge-keep", "Order 0.4 million cans for Wed Nov 18 and keep that date even if it costs more.");
 await task(async () => {
   await go("?role=customer" + Q);
   await pick("Company", "AB InBev");
+  await fill("Million cans", 0.4);
+  await fill("Deliver on", "2026-11-18");
+  await click("Send order");
+});
+for (const dept of ["Sales", "Inventory", "Planning"]) {
+  persona(`${dept} team`, `edge-keep-${dept.toLowerCase()}`, "Answer AB InBev's order.");
+  await task(async () => { await answer(dept); });
+}
+persona("Lee (Logistics)", "edge-spot", "AB InBev's lane has one carrier taking 1 a week. Offer the customer spot.");
+await task(async () => {
+  await go("?role=orders" + Q);
+  await iAm("Logistics");
+  await look("one-carrier lane");
+  await click("Offer spot to customer");
+});
+persona("Cy (customer, AB InBev buyer)", "edge-keep2", "Keep my date and pay the fee.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await click("My POs", { role: "link" });
+  const keep = page.getByRole("button", { name: /^Keep / });
+  if (!(await keep.count())) { issue("No way to keep my date."); throw new Error("no keep"); }
+  await click((await keep.first().textContent()).trim());
+  await sees("Expedite fee", "the fee on my PO");
+  await look("kept date");
+});
+persona("Bo (customer, PepsiCo buyer)", "edge-late", "Rush: order 0.4 million cans for Sat Nov 7 (2 days out).");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await pick("Company", "PepsiCo");
   await fill("Million cans", 0.4);
   await fill("Deliver on", "2026-11-07");
   await click("Send order");
@@ -334,61 +278,27 @@ await task(async () => {
   await click("Accept", { exact: true });
   await sees("1/4 accepted", "the order back in play");
 });
-persona("Cy (customer, AB InBev buyer)", "edge-late2", "Check my rush order.");
+persona("Ivy (Inventory)", "edge-stock", "Check how many labeled cans each customer has left.");
 await task(async () => {
-  await go("?role=customer" + Q);
-  await click("My POs", { role: "link" });
-  await look("rush status");
-  await sees("Checking", "my rush order is being checked");
+  await go("?role=exec" + Q);
+  await hub("Inventory", "Stock");
+  await look("stock");
+  await sees("Coca-Cola");
 });
-persona("Pat (customer, Coca-Cola buyer)", "edge-cut", "Demand dropped: cut the booked Nov 19 order to 1.6 million cans.");
+persona("Pia (Planning)", "edge-line", "Check line time and the yearly baseline.");
 await task(async () => {
-  await go("?role=customer" + Q);
-  await pick("Company", "Coca-Cola");
-  await click("My POs", { role: "link" });
-  const cards = page.locator(".card", { hasText: "Thu, Nov 19" });
-  await cards.first().getByRole("button", { name: "Change" }).click(); P.clicks++; await pause();
-  await fill("Million cans", 1.6);
-  await sees("−2", "the cut in truckloads");
-  await click("Send change");
-});
-for (const dept of ["Sales", "Inventory", "Production", "Logistics"]) {
-  persona(`${dept} team`, `edge-cut-${dept.toLowerCase()}`, "Answer the cut.");
-  await task(async () => {
-    await go("?role=orders" + Q);
-    await iAm(dept);
-    await look(`cut ${dept}`);
-    step(`Open order: ${(await page.locator("#o-detail .d-what").textContent().catch(() => "none")).trim()}`);
-    if (await page.getByText("Nothing waiting on you").isVisible().catch(() => false)) { step("Nothing waiting on me"); return; }
-    const bad = await page.locator(".d-mine .d-check.bad").count();
-    await click(bad ? "Deny" : "Accept", { exact: true });
-  });
-}
-persona("Lee (Logistics)", "edge-transfer", "A warehouse wants 8 truckloads to Mississauga this Saturday. See the cost, then move it to Monday.");
-await task(async () => {
-  await go("?role=transfers" + Q);
-  await iAm("Logistics");
-  await pick("To", "Mississauga, ON");
-  await fill("Truckloads", 8);
-  await fill("Ship on", "2026-11-07");
-  await look("transfer in 2 days");
-  await sees("spot", "that 2 days out means spot");
-  await fill("Ship on", "2026-11-09");
-  await sees("8 contract", "all contract at 4 days out");
-  await click("Put on calendar");
-});
-persona("Lee (Logistics)", "edge-remove", "Changed my mind: remove the Adairsville transfer.");
-await task(async () => {
-  await click("Transfers", { role: "link" });
-  const before = await page.locator("#p-list li").count();
-  await click("Remove", { exact: true });
-  if ((await page.locator("#p-list li").count()) !== before - 1) issue("Remove didn't take the transfer off the list.");
+  await go("?role=exec" + Q);
+  await hub("Planning", "Line time");
+  await look("line time");
+  await click("Long-term", { role: "link", exact: true });
+  await look("long-term");
+  await sees("2026 plan", "this year's plan");
 });
 persona("Sam (Sales)", "edge-perm", "Try to book trucks even though I'm in Sales.");
 await task(async () => {
   await go("?role=calendar" + Q);
   await iAm("Sales");
-  if (await page.locator("#subnav a", { hasText: "Trucks" }).count()) issue("The Sales hub has a Trucks tab.");
+  if (await page.locator("#subnav a", { hasText: "Lanes" }).count()) issue("The Sales hub has a Lanes tab.");
   if (await page.getByRole("button", { name: /^Book/ }).count()) issue("Sales can see Book buttons.");
 });
 
@@ -396,12 +306,11 @@ persona("Erin (Executive)", "exec", "See how each department is doing and what w
 await task(async () => {
   await go("?role=exec" + Q);
   await iAm("Executive");
-  const s = await look("executive");
-  for (const t of ["Saved", "Spot spent", "Sales", "Inventory", "Production", "Logistics"]) await sees(t);
+  await look("executive");
+  for (const t of ["Saved", "Spot Ball paid", "Sales", "Inventory", "Planning", "Logistics"]) await sees(t);
   const saved = await page.locator(".big-save .big-n").textContent();
   step(`Saved shows ${saved}`);
-  if (/\$0$/.test(saved.trim())) issue("Saved is $0 after a denied change and a spread-out transfer.");
-  void s;
+  if (/\$0$/.test(saved.trim())) issue("Saved is $0 after a paced prebuild.");
 });
 
 const finalData = await page.evaluate(() => JSON.parse(localStorage.getItem("bc_items_v3") || "[]"));
