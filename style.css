@@ -395,3 +395,27 @@ a.x-card.x-bad:hover { box-shadow: inset 0 4px 0 var(--red), inset 0 0 0 1.5px v
 a.x-name { display: inline-flex; align-items: center; color: var(--ink); text-decoration: none; }
 a.x-name:hover { color: var(--teal); }
 a.x-name .ic { margin: 0 0 0 4px; width: .9em; }
+
+/* Lanes tab: calendar view (six weeks of day boxes) */
+.cal-head .seg { display: inline-flex; margin: 0; }
+.cal-head .seg button { flex: none; padding: 0 14px; }
+.month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.m-dow { font-weight: 600; font-size: 13px; color: var(--muted); text-align: center; padding-bottom: 2px; }
+.m-day { background: var(--cream); border-radius: 10px; min-height: 96px; padding: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.m-day.m-past { opacity: .5; }
+.m-day.m-today { box-shadow: inset 0 0 0 2px var(--teal); }
+.m-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+.m-num { font: 400 17px/1.2 var(--serif); color: var(--ink); }
+.m-today .m-num { color: var(--teal); font-weight: 600; }
+.m-tot { font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.m-load { display: flex; justify-content: space-between; align-items: center; gap: 4px; width: 100%; min-height: 26px; padding: 2px 7px; border: 0; border-radius: 6px; font-size: 12.5px; font-weight: 600; text-align: left; cursor: pointer; color: var(--ink); }
+.m-load .m-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.m-load b { white-space: nowrap; }
+.m-tag { font-size: 10px; font-weight: 700; opacity: .7; margin-right: 4px; }
+.m-con { background: var(--contract); color: var(--white); }
+.m-open { background: var(--white); box-shadow: inset 0 0 0 2px var(--contract); }
+.m-ctr { background: #e0a526; }
+.m-spot { background: var(--spot); color: var(--white); }
+.m-chk { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); border: 0; outline: 1.5px dashed var(--muted); outline-offset: -1.5px; box-shadow: none; }
+.m-load.c-pick { outline: 2px solid var(--ink); outline-offset: 1px; }
+.cal-head [hidden] { display: none !important; }

@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=44";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=44";
+import * as E from "./engine.js?v=45";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=45";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -503,9 +503,11 @@ function calendarView(store, state) {
   let wk = PARAMS.has("week") ? Math.min(RULES.weeks - 1, Math.max(0, +PARAMS.get("week"))) : null; // null: first week with something to book
   let pick = null; // "laneKey@day"
   let showAll = false; // every pilot lane, or just the ones with something moving that week
+  let view = PARAMS.get("view") === "lanes" ? "lanes" : "month"; // month: six weeks of day boxes; lanes: one row per lane
   const html = `<div class="cols cols-cal">
     <section class="panel"><div class="cal-head"><button type="button" class="util icon-btn" id="w-prev" aria-label="Previous week">${icon("left")}</button><h1 id="w-label"></h1>
       <button type="button" class="util icon-btn" id="w-next" aria-label="Next week">${icon("right")}</button>
+      <span class="seg" role="group" aria-label="View"><button type="button" data-view="month">Calendar</button><button type="button" data-view="lanes">By destination</button></span>
       <span class="legend"><i class="sq sq-con"></i>Booked <i class="sq sq-con-open"></i>To book <i class="sq sq-ctr"></i>Counteroffer <i class="sq sq-spot"></i>Spot <i class="sq sq-chk"></i>Not accepted</span></div>
       <div id="cal"></div></section>
     <section class="panel side" id="cal-side"></section>
@@ -521,6 +523,8 @@ function calendarView(store, state) {
         if (pick) wk = E.weekIndex(pick.split("@")[1], NOW);
         return live(state.items);
       }
+      const v = e.target.closest("[data-view]");
+      if (v) { view = v.dataset.view; return live(state.items); }
       if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
       if (e.target.closest("#all-lanes")) { showAll = !showAll; return live(state.items); }
       const b = e.target.closest("button[data-book], button[data-bookall], button[data-bookitem]");
@@ -595,6 +599,9 @@ function calendarView(store, state) {
 
   function live(items) {
     if (wk == null) { const first = E.toBookItems(items, NOW)[0]; wk = first ? E.weekIndex(first.first, NOW) : 0; }
+    for (const b of $("#app").querySelectorAll("[data-view]")) { b.classList.toggle("on", b.dataset.view === view); b.setAttribute("aria-pressed", String(b.dataset.view === view)); }
+    $("#w-prev").hidden = $("#w-next").hidden = view === "month";
+    if (view === "month") return month(items);
     const start = E.addDays(E.weekKey(NOW), wk * 7);
     $("#w-label").textContent = wk === 0 ? `This week · ${weekLabel(start)}` : weekLabel(start);
     $("#w-prev").disabled = wk === 0;
@@ -616,6 +623,36 @@ function calendarView(store, state) {
       ${shown.length ? "" : `<p class="empty">Nothing moving this week.</p>`}
       <button type="button" class="linkish" id="all-lanes">${showAll ? "Only lanes with loads" : `All ${rows.length} lanes`}</button>`;
     $("#cal-side").innerHTML = side(items, rows);
+  }
+
+  // Calendar: every planning week, one box per day, one line per lane with loads that day.
+  function month(items) {
+    const weeks = Array.from({ length: RULES.weeks }, (_, w) => E.calendar(items, NOW, w));
+    const first = weeks[0][0].cells[0].day, last = weeks.at(-1)[0].cells.at(-1).day;
+    $("#w-label").textContent = `${fmtShort(first)} – ${fmtShort(last)}`;
+    const load = (r, c) => {
+      const n = c.moves.reduce((s, m) => s + m.n, 0);
+      const k = c.spot ? "spot" : c.counter ? "ctr" : c.checking === n ? "chk" : c.toBook ? "open" : "con";
+      const key = `${r.lane.key}@${c.day}`;
+      const name = r.lane.kind === "order" ? custName(r.lane.destination) : r.lane.destination.split(",")[0];
+      const extra = c.spot && c.spot < n ? ` · ${c.spot} spot` : c.counter && c.counter < n ? ` · ${c.counter} short` : "";
+      return `<button type="button" class="m-load m-${k}${pick === key ? " c-pick" : ""}" data-cell="${esc(key)}" title="${esc(r.lane.destination)}">
+        <span class="m-name">${r.lane.kind === "transfer" ? `<span class="m-tag">WH</span>` : ""}${esc(name)}</span><b>${n}${esc(extra)}</b></button>`;
+    };
+    const day = (rows, i) => {
+      const d = rows[0].cells[i].day, dt = E.atNoon(d);
+      const busy = rows.filter((r) => r.cells[i].moves.length);
+      const n = busy.reduce((s, r) => s + r.cells[i].moves.reduce((t, m) => t + m.n, 0), 0);
+      const num = d === first || dt.getDate() === 1 ? fmtShort(d) : dt.getDate();
+      return `<div class="m-day${d === NOW ? " m-today" : ""}${d < NOW ? " m-past" : ""}">
+        <div class="m-top"><span class="m-num">${esc(num)}</span>${n ? `<span class="m-tot">${plural(n, "truck")}</span>` : ""}</div>
+        ${busy.map((r) => load(r, r.cells[i])).join("")}</div>`;
+    };
+    $("#cal").innerHTML = `<div class="month">
+      ${weeks[0][0].cells.map((c) => `<div class="m-dow">${esc(dow(c.day))}</div>`).join("")}
+      ${weeks.map((rows) => rows[0].cells.map((_, i) => day(rows, i)).join("")).join("")}</div>
+      ${weeks.some((rows) => rows.some((r) => r.busy)) ? "" : `<p class="empty">No trucks yet. Accepted orders and scheduled prebuilds show up here.</p>`}`;
+    $("#cal-side").innerHTML = side(items, weeks[wk]);
   }
 
   return { html, mount, live };

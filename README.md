@@ -39,7 +39,7 @@ EXECUTIVE: Saved vs the old weekly batches · spot % vs the 8% goal · what's wa
 | Sales | Orders (check; price tag; reliability) · Customers (reliability per customer; 90%+ = Priority) |
 | Inventory | Orders · Stock (labeled cans per customer) |
 | Planning | Orders (line time / freeze) · Short-term (6-week customer forecasts + Prebuild) · Long-term (12 months: real 2025/2026 loads, 2026 plan = 2025 + 2%) · Line time |
-| Logistics | Orders (routing guide; Counteroffer) · Lanes (calendar: loads per day, carriers per load, routing guide, To book) · Transfers (prebuilds: one batch vs paced waves; Schedule) |
+| Logistics | Orders (routing guide; Counteroffer) · Lanes (Calendar: six weeks of days, each listing its loads; By destination: one row per lane; click a load for its carriers and routing guide; To book) · Transfers (prebuilds: one batch vs paced waves; Schedule) |
 | Executive | Saved, spot Ball paid, expedite fees billed, spot share (old way vs now vs 8%), where savings came from, one card per hub |
 
 Old links still work (`?role=review|schedule|dashboard|sales|production|outlook`). Flags: `&today=2026-11-05` rehearses a date (the banner's date picker moves it); `&local` = backup mode (this laptop only).
