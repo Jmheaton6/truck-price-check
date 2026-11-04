@@ -313,7 +313,7 @@ await task(async () => {
   if (/\$0$/.test(saved.trim())) issue("Saved is $0 after a paced prebuild.");
 });
 
-const finalData = await page.evaluate(() => JSON.parse(localStorage.getItem("bc_items_v3") || "[]"));
+const finalData = await page.evaluate(() => JSON.parse(localStorage.getItem("bc_items_v4") || "[]"));
 if (errors.length) report.push({ name: "Browser errors", role: "errors", goal: "", steps: errors, screens: [], issues: errors.map((e) => "JS error: " + e), clicks: 0, done: false });
 await browser.close();
 

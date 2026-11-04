@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=43";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=43";
+import * as E from "./engine.js?v=44";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=44";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -40,7 +40,7 @@ async function makeStore() {
       },
     };
   }
-  const KEY = "bc_items_v3";
+  const KEY = "bc_items_v4"; // v4: the Monticello pilot (older local data is left behind)
   const listeners = [];
   const read = () => JSON.parse(localStorage.getItem(KEY) || "[]");
   const write = (rows) => { localStorage.setItem(KEY, JSON.stringify(rows)); listeners.forEach((f) => f()); };
@@ -57,10 +57,19 @@ async function makeStore() {
 
 // Forecast versions are saved as "ask" rows with status "noted" and data.kind "forecast", so the items table
 // needs no new SQL. The rest of the app sees them as type "forecast".
+// Rows from earlier versions of the app (other pilot plants, old transfer shapes, carrier asks) are skipped,
+// so leftover data can't break a screen.
+const fits = (r) => {
+  const d = r.data || {};
+  if (r.type === "order") return !!SIM_CUSTOMERS[d.customer] && /^\d{4}-\d\d-\d\d$/.test(d.date || "") && Number.isFinite(d.trucks);
+  if (r.type === "transfer") return !!E.laneOf("transfer", d.destination) && /^\d{4}-\d\d-\d\d$/.test(d.ready || "") && Number.isFinite(d.trucks);
+  if (r.type === "forecast") return !!SIM_CUSTOMERS[d.customer] && /^\d{4}-\d\d-\d\d$/.test(d.week || "");
+  return false;
+};
 function withForecasts(store) {
   const out = (r) => (r.type === "ask" && r.data?.kind === "forecast" ? { ...r, type: "forecast" } : r);
   const inn = (r) => (r.type === "forecast" ? { ...r, type: "ask", status: "noted", data: { ...r.data, kind: "forecast" } } : r);
-  return { ...store, list: async () => (await store.list()).map(out), add: async (row) => out(await store.add(inn(row))) };
+  return { ...store, list: async () => (await store.list()).map(out).filter(fits), add: async (row) => out(await store.add(inn(row))) };
 }
 
 // ---------- Helpers ----------
