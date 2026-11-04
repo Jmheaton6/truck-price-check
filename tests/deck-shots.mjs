@@ -14,7 +14,7 @@ mkdirSync(OUT, { recursive: true });
 
 const b = await chromium.launch();
 const p = await (await b.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 })).newPage();
-const go = async (q) => { await p.goto(BASE + q); await p.addStyleTag({ content: "#mode-banner{display:none!important}.toast{display:none!important}#x-reset{display:none!important}" }); await p.waitForTimeout(600); };
+const go = async (q) => { await p.goto(BASE + q); await p.addStyleTag({ content: "#mode-banner{display:none!important}.toast{display:none!important}#reset-demo{display:none!important}" }); await p.waitForTimeout(600); };
 const shot = (name) => p.screenshot({ path: join(OUT, `${name}.png`) });
 const btn = async (name, exact = true) => { await p.getByRole("button", { name, exact }).first().click(); await p.waitForTimeout(450); };
 const bookAll = async () => { const all = p.getByRole("button", { name: /^Book all/ }); if (await all.count()) await all.first().click(); else await p.getByRole("button", { name: "Book", exact: true }).first().click(); await p.waitForTimeout(450); };

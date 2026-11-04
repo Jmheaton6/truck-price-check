@@ -1,9 +1,10 @@
-import * as E from "./engine.js?v=46";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=46";
+import * as E from "./engine.js?v=47";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=47";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
 const NOW = PARAMS.get("today") || E.isoDate(new Date()); // ?today=2026-11-05 to rehearse a date
+const DEMO_DAY = "2026-11-05"; // the demo story starts here (competition day)
 const FORCE_LOCAL = PARAMS.has("local");                   // ?local = backup if the room's Wi-Fi fails
 
 // Ball HQ: one hub per department, each with its own tabs. Anyone can open any hub (the demo acts as all of them);
@@ -853,18 +854,7 @@ function execView(store, state) {
     <div id="x-top" class="x-top"></div>
     <div id="x-from" class="x-from"></div>
     <div id="x-cards" class="x-cards"></div>
-    <button type="button" id="x-reset" class="linkish quiet">Clear all data</button>
   </section>`;
-
-  function mount() {
-    $("#x-reset").addEventListener("click", async () => {
-      const pin = store.live ? prompt("Admin PIN:") : "local";
-      if (pin === null) return;
-      if (!store.live && !confirm("Clear everything on this laptop?")) return;
-      try { await store.reset(pin); toast("Cleared."); state.refresh(); }
-      catch (err) { toast("Not cleared: " + err.message, true); }
-    });
-  }
 
   function live(items) {
     const now = E.totals(items, NOW);
@@ -900,7 +890,7 @@ function execView(store, state) {
         [[waiting("logistics"), "waiting"], [toBook, "to book"], [toSchedule, "to schedule"]]);
   }
 
-  return { html, mount, live };
+  return { html, live };
 }
 
 // ---------- Home ----------
@@ -940,9 +930,23 @@ async function main() {
   const switcher = portal === "home" ? "" : `<nav class="switch" aria-label="Switch portal">
     <a href="${link("customer")}" class="${portal === "customer" ? "on" : ""}">Customer HQ</a><a href="${hubLink(lastHub, lastTab)}" class="${portal === "ball" ? "on" : ""}">Ball HQ</a></nav>`;
   $("#who").innerHTML = switcher + (portal === "customer"
-    ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>` : "");
+    ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>` : "")
+    + `<button type="button" id="reset-demo" class="reset-demo">Reset demo</button>`;
 
   const store = withForecasts(await makeStore());
+  // Reset demo: clear every order, forecast, prebuild and extra truck, forget the last company and hub,
+  // and start over on the home page on demo day. The live database needs the admin PIN.
+  $("#reset-demo").addEventListener("click", async () => {
+    const pin = store.live ? prompt("Admin PIN to reset the demo:") : "local";
+    if (pin === null) return;
+    if (!store.live && !confirm("Reset the demo? This clears everything.")) return;
+    try {
+      await store.reset(pin);
+      ["bc_company", "bc_dept", "bc_tab"].forEach((k) => localStorage.removeItem(k));
+      const q = [FORCE_LOCAL ? "local" : "", NOW !== DEMO_DAY || PARAMS.get("today") ? `today=${DEMO_DAY}` : ""].filter(Boolean).join("&");
+      location.href = "./" + (q ? "?" + q : "");
+    } catch (err) { toast("Not reset: " + err.message, true); }
+  });
   const drawNav = (items = []) => {
     if (portal === "customer") {
       const need = needsCustomer(items, state.company).length;

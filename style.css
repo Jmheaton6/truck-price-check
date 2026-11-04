@@ -431,3 +431,7 @@ a.x-name .ic { margin: 0 0 0 4px; width: .9em; }
 .ew-row .row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
 .ew-fix { display: flex; gap: 6px; margin-top: 4px; }
 .ew-fix select { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line, #ddd); background: var(--white); }
+
+/* Header: Reset demo (presenter only; the live site asks for the PIN) */
+.reset-demo { border: 1px solid rgba(255,255,255,.35); background: transparent; color: rgba(255,255,255,.85); font: 600 13px var(--sans); padding: 6px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.reset-demo:hover { color: var(--white); border-color: var(--white); }
