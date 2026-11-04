@@ -1,15 +1,24 @@
-import * as E from "./engine.js?v=39";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=39";
+import * as E from "./engine.js?v=41";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=41";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
 const NOW = PARAMS.get("today") || E.isoDate(new Date()); // ?today=2026-11-05 to rehearse a date
 const FORCE_LOCAL = PARAMS.has("local");                   // ?local = backup if the room's Wi-Fi fails
 
-const BALL = { outlook: "Outlook", orders: "Orders", calendar: "Trucks", transfers: "Transfers", exec: "Executive" };
+// Ball HQ: one hub per department, each with its own tabs. Anyone can open any hub (the demo acts as all of them);
+// the hub you're in is the department you're answering as.
+const HUBS = {
+  sales:      { name: "Sales",      tabs: { orders: "Orders", outlook: "Outlook" } },
+  inventory:  { name: "Inventory",  tabs: { orders: "Orders", stock: "Stock" } },
+  production: { name: "Production", tabs: { orders: "Orders", line: "Line time" } },
+  logistics:  { name: "Logistics",  tabs: { orders: "Orders", outlook: "Outlook", calendar: "Trucks", transfers: "Transfers" } },
+  exec:       { name: "Executive",  tabs: { exec: "Dashboard" } },
+};
+// Old links still land somewhere sensible.
 const ALIASES = { review: "orders", pos: "orders", team: "orders", ball: "orders", sales: "orders", inventory: "orders", production: "orders",
   logistics: "calendar", schedule: "calendar", forecast: "outlook", warning: "outlook", carrier: "calendar", plan: "calendar", hub: "exec", dashboard: "exec" };
-const DEPT = { sales: "Sales", inventory: "Inventory", production: "Production", logistics: "Logistics", exec: "Executive" };
+const DEPT = Object.fromEntries(Object.entries(HUBS).map(([k, h]) => [k, h.name]));
 const LAST_DAY = E.addDays(E.weekKey(NOW), RULES.weeks * 7 - 1);
 
 // ---------- Data store: Supabase when configured, this browser otherwise ----------
@@ -77,6 +86,7 @@ function link(role, extra = {}) {
   if (PARAMS.get("today")) s += `&today=${PARAMS.get("today")}`;
   return s;
 }
+const hubLink = (hub, tab, extra = {}) => link(tab, { hub, ...extra });
 const byId = (items, id) => items.find((x) => String(x.id) === String(id));
 const orders = (items) => items.filter((x) => x.type === "order");
 const isChange = (it) => it.data.kind === "change";
@@ -358,6 +368,17 @@ function outlookView(store, state) {
       const cell = e.target.closest("[data-ol]");
       if (cell) { pick = pick === cell.dataset.ol ? null : cell.dataset.ol; return live(state.items); }
       if (e.target.closest("#side-back")) { pick = null; return live(state.items); }
+      const all = e.target.closest("button[data-olall]");
+      if (all) {
+        all.disabled = true;
+        try {
+          const ups = E.warnings(await store.list(), NOW).filter((x) => x.kind === "up");
+          for (const x of ups) await store.add({ type: "ask", status: "yes", data: { kind: x.lane.kind, destination: x.lane.destination, week: x.week, date: x.week, trucks: x.n, accepted: x.n, on: NOW } });
+          toast(`Pre-booked ${plural(ups.reduce((s, x) => s + x.n, 0), "truck")}.`);
+          state.refresh();
+        } catch (err) { toast("Couldn't save: " + err.message, true); all.disabled = false; }
+        return;
+      }
       const b = e.target.closest("button[data-olbook], button[data-olrelease]");
       if (!b) return;
       if (state.dept !== "logistics") return toast("Switch to Logistics.", true);
@@ -382,7 +403,8 @@ function outlookView(store, state) {
     if (w.surplus && w.latest < w.base) return `<button type="button" class="util small" data-olrelease="${w.surplus}" ${data}>Release ${w.surplus}</button>`;
     return "";
   }
-  const status = (w) => w.gap ? `<span class="ol-gap">${w.gap} open</span>`
+  const soon = (w) => w.canBook && E.daysBetween(NOW, w.bookBy) <= 7;
+  const status = (w) => w.gap ? (w.zone !== "G" || soon(w) ? `<span class="ol-gap">${w.gap} open</span>` : "")
     : w.surplus && w.latest < w.base ? `<span class="ol-sur">${w.surplus} extra</span>`
     : w.extra ? `<span class="ol-ok">${icon("check")}Covered</span>` : "";
 
@@ -409,7 +431,9 @@ function outlookView(store, state) {
     }
     const list = E.warnings(items, NOW);
     if (!list.length) return `<h2>To act on</h2><p class="empty">Nothing. Every week is covered.</p>`;
-    return `<h2>To act on</h2><ul class="tobook">${list.map((x) => {
+    const ups = list.filter((x) => x.kind === "up");
+    const all = ups.reduce((s, x) => s + x.n, 0);
+    return `<h2>To act on</h2>${state.dept === "logistics" && ups.length > 1 ? `<button type="button" class="cta top-cta" data-olall="1">Book all ${all}</button>` : ""}<ul class="tobook">${list.map((x) => {
       const row = rows.find((r) => r.customer === x.customer);
       const by = x.bookBy;
       return `<li class="tb-row"><button type="button" class="row" data-ol="${esc(x.customer)}@${x.wk}">
@@ -424,11 +448,11 @@ function outlookView(store, state) {
     const rows = E.outlook(items, NOW);
     const weeks = rows[0].weeks.map((w) => w.week);
     $("#ol").innerHTML = `<div class="table-wrap"><table class="cal ol">
-      <thead><tr><th></th>${weeks.map((d, i) => `<th>${i === 0 ? "This week" : "Week of"} <span>${esc(fmtShort(d))}</span></th>`).join("")}</tr></thead>
+      <thead><tr><th></th>${weeks.map((d, i) => `<th>${i === 0 ? "This week" : ""} <span>${esc(fmtShort(d))}</span></th>`).join("")}</tr></thead>
       <tbody>${rows.map((r) => `<tr><th scope="row">${esc(custName(r.customer))}<span class="city">${esc(r.customer)}</span></th>
         ${r.weeks.map((w) => {
           const key = `${r.customer}@${w.wk}`;
-          const cls = [w.gap ? "c-spot" : "", pick === key ? "c-pick" : ""].join(" ");
+          const cls = [w.gap && w.zone !== "G" ? "c-spot" : "", pick === key ? "c-pick" : ""].join(" ");
           return `<td class="${cls}"><button type="button" class="cell ol-cell" data-ol="${esc(key)}" aria-label="${esc(custName(r.customer))}, week of ${esc(fmtShort(w.week))}">
             <span class="ol-n">${w.need}</span>${w.change || w.zone === "N" ? `<span class="z z-${w.zone}">${zoneText(w)}</span>` : ""}${status(w)}</button></td>`;
         }).join("")}</tr>`).join("")}</tbody></table></div>`;
@@ -503,7 +527,7 @@ function ordersView(store, state) {
       <p class="d-what">${parent ? `Change: ${changeText(items, it)}` : whatOf(items, it)} · ${esc(fmtDate(it.data.date))}</p>
       <div class="dcards">${TEAMS.map(card).join("")}</div>
       ${st === "denied" && it.data.denied ? `<p class="note note-no">${DEPT[it.data.denied.team]} denied: ${esc(it.data.denied.why)}</p>` : ""}
-      ${st === "accepted" ? `<p class="note note-ok">${icon("check")}Accepted · <a href="${link("calendar", { week: E.weekIndex(it.data.date, NOW) })}">Book trucks</a></p>` : ""}
+      ${st === "accepted" ? `<p class="note note-ok">${icon("check")}Accepted · <a href="${hubLink("logistics", "calendar", { week: E.weekIndex(it.data.date, NOW) })}">Book trucks</a></p>` : ""}
       ${st === "booked" ? `<p class="note note-ok">${icon("check")}Trucks booked</p>` : ""}`;
   }
 
@@ -717,6 +741,44 @@ function transfersView(store, state) {
   return { html, mount, live };
 }
 
+// ---------- Ball HQ · Inventory: labeled cans in stock ----------
+function stockView() {
+  const html = `<section class="panel narrow"><h1>Labeled cans at Findlay</h1><div id="st"></div><p class="small">Truckloads. Labeled cans fit only that customer.</p></section>`;
+  function live(items) {
+    const plan = E.planUse(items, NOW);
+    const os = orders(items).filter((x) => E.isActive(x));
+    const sum = (c, status, f) => os.filter((x) => x.data.customer === c && (status ? x.status === status : true)).reduce((s, x) => s + (f(plan.get(x.id)) || 0), 0);
+    const stranded = (c) => os.filter((x) => x.data.customer === c && x.status === "confirmed" && x.data.trucks < 0 && plan.get(x.id)?.frozen).reduce((s, x) => s - x.data.trucks, 0);
+    $("#st").innerHTML = `<table class="tbl"><thead><tr><th></th><th>In stock</th><th>Promised</th><th>Checking</th><th>Left</th><th>Stranded</th></tr></thead><tbody>
+      ${Object.entries(SIM_CUSTOMERS).map(([c, x]) => {
+        const promised = sum(c, "confirmed", (p) => p?.fromStock), checking = sum(c, "waiting", (p) => p?.fromStock), str = stranded(c);
+        return `<tr><th scope="row">${esc(x.name)}</th><td>${x.stock}</td><td>${promised}</td><td class="muted">${checking}</td><td><strong>${x.stock - promised - checking}</strong></td><td class="${str ? "t-spot" : "muted"}">${str}</td></tr>`;
+      }).join("")}</tbody></table>`;
+  }
+  return { html, live };
+}
+
+// ---------- Ball HQ · Production: line time per week ----------
+function lineView() {
+  const html = `<section class="panel"><h1>Line time, next 6 weeks</h1>
+    <span class="legend line-legend"><i class="lb lb-used"></i>Accepted <i class="lb lb-chk"></i>Checking <i class="lb lb-left"></i>Open</span>
+    <div id="ln" class="ln"></div><p class="small">Truckloads of cans. Weeks start Sunday.</p></section>`;
+  function live(items) {
+    const plan = E.planUse(items, NOW);
+    const os = orders(items).filter((x) => E.isActive(x) && x.data.trucks > 0);
+    $("#ln").innerHTML = Array.from({ length: RULES.weeks }, (_, wk) => {
+      const open = E.SIM_LINE_TIME[wk] + E.plannedLine(items, wk, NOW);
+      const made = (status) => os.filter((x) => x.status === status && plan.get(x.id)?.wk === wk).reduce((s, x) => s + (plan.get(x.id)?.made || 0), 0);
+      const used = made("confirmed"), chk = made("waiting"), left = Math.max(0, open - used - chk);
+      const frozen = E.daysBetween(NOW, E.addDays(E.weekKey(NOW), wk * 7 + 6)) < RULES.makeLeadDays + RULES.freezeDays;
+      return `<div class="ln-wk"><p class="ln-h">${wk === 0 ? "This week" : esc(fmtShort(E.addDays(E.weekKey(NOW), wk * 7)))}${frozen ? ` <span class="chip chip-checking">Frozen</span>` : ""}</p>
+        <p class="ln-n">${left} <span>of ${open} open</span></p>
+        <span class="ln-bar">${used ? `<i class="lb-used" style="flex:${used}"></i>` : ""}${chk ? `<i class="lb-chk" style="flex:${chk}"></i>` : ""}${left ? `<i class="lb-left" style="flex:${left}"></i>` : ""}</span></div>`;
+    }).join("");
+  }
+  return { html, live };
+}
+
 // ---------- Ball HQ · Executive ----------
 function execView(store, state) {
   const html = `<section class="exec">
@@ -738,33 +800,35 @@ function execView(store, state) {
 
   function live(items) {
     const now = E.totals(items, NOW);
-    const old = E.totals(items, NOW, { oldWay: true });
+    const old = E.oldWay(items); // the same freight at these lanes' 2026 spot rates
     const s = E.scorecards(items, NOW);
     const saved = Math.max(0, old.overspend - now.overspend);
     const bar = (label, t, cls) => `<div class="bar-row"><span class="bar-label">${label}</span>
       <span class="bar">${t.trucks ? `<i class="bar-con" style="flex:${t.contract}"></i><i class="bar-spot" style="flex:${t.spot}"></i>` : `<i class="bar-none"></i>`}</span>
       <span class="bar-n ${cls}">${t.trucks ? `${pct(t.spotShare)} spot` : "–"}</span></div>`;
     $("#x-top").innerHTML = `
-      <div class="big-card big-save"><p class="big-label">Saved</p><p class="big-n">${money(saved)}</p><p class="big-sub">${plural(Math.max(0, old.spot - now.spot), "fewer spot truck", "fewer spot trucks")}</p></div>
+      <div class="big-card big-save"><p class="big-label">Saved</p><p class="big-n">${money(saved)}</p><p class="big-sub">${plural(Math.max(0, Math.round(old.spot - now.spot)), "fewer spot truck", "fewer spot trucks")}</p></div>
       <div class="big-card"><p class="big-label">Spot spent</p><p class="big-n">${money(now.overspend)}</p><p class="big-sub">${plural(now.spot, "spot truck")}</p></div>
       <div class="big-card wide"><p class="big-label">Spot share</p>${bar("Old way", old, "bad")}${bar("Now", now, now.spotShare <= RULES.spotGoal ? "good" : "bad")}
-        <p class="big-sub">Goal ${pct(RULES.spotGoal)} · 2026 so far ${pct(RULES.spotToday)}</p></div>`;
+        <p class="big-sub">Old way = these lanes' 2026 spot rates · Goal ${pct(RULES.spotGoal)}</p></div>`;
     const by = E.savingsBy(items, NOW);
-    const parts = [["Check-off", by.checkoff], ["Booked ahead", by.bookAhead], ["Transfers ahead", by.transfers], ["Early warning", by.warning]].filter(([, v]) => v > 0);
+    const parts = [["Customer orders", by.orders], ["Transfers", by.transfers]].filter(([, v]) => v > 0);
     const top = Math.max(1, ...parts.map(([, v]) => v));
     $("#x-from").innerHTML = saved ? `<p class="big-label">Where it came from</p>${parts.map(([n, v]) => `<div class="from-row"><span>${n}</span>
         <span class="from-bar"><i style="width:${(v / top) * 100}%"></i></span><span class="from-n">${money(v)}</span></div>`).join("")}` : "";
-    const card = (name, value, sub, good) => `<div class="x-card ${good == null ? "" : good ? "x-good" : "x-bad"}"><p class="x-name">${name}</p><p class="x-n">${value}</p><p class="x-sub">${sub}</p></div>`;
+    // One card per hub: its number, and what's waiting on it. Click to open the hub.
+    const card = (name, value, sub, good, backlog = []) => { const hub = Object.keys(HUBS).find((k) => HUBS[k].name === name);
+      const due = backlog.filter(([n]) => n).map(([n, what]) => `${n} ${what}`).join(" · ");
+      return `<a class="x-card ${good == null ? "" : good ? "x-good" : "x-bad"}" href="${hubLink(hub, "orders")}"><p class="x-name">${name}</p><p class="x-n">${value}</p><p class="x-sub">${sub}</p>${due ? `<p class="x-wait">${due}</p>` : ""}</a>`; };
     const m = s.sales.answerMin;
     const waiting = (t) => orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[t]).length;
-    const wait = (t) => (waiting(t) ? ` · <strong>${waiting(t)} waiting</strong>` : "");
     const toBook = E.toBookItems(items, NOW).length;
-    const warn = E.warnings(items, NOW).length;
     $("#x-cards").innerHTML =
-      card("Sales", m == null ? "–" : m < 60 ? `${Math.max(1, Math.round(m))} min` : `${(m / 60).toFixed(1)} hr`, `to answer · goal 4 hr${wait("sales")}`, m == null ? null : m <= 240) +
-      card("Inventory", `${s.inventory.stranded}`, `truckloads stranded${wait("inventory")}`, s.inventory.stranded === 0) +
-      card("Production", pct(s.production.share), `line time used${wait("production")}`, null) +
-      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked 3+ days ahead${wait("logistics")}${toBook ? ` · <strong>${toBook} to book</strong>` : ""}${warn ? ` · <strong>${warn} warnings</strong>` : ""}`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null);
+      card("Sales", m == null ? "–" : m < 60 ? `${Math.max(1, Math.round(m))} min` : `${(m / 60).toFixed(1)} hr`, "to answer · goal 4 hr", m == null ? null : m <= 240, [[waiting("sales"), "waiting"]]) +
+      card("Inventory", `${s.inventory.stranded}`, "truckloads stranded", s.inventory.stranded === 0, [[waiting("inventory"), "waiting"]]) +
+      card("Production", pct(s.production.share), "line time used", null, [[waiting("production"), "waiting"]]) +
+      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked ahead`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null,
+        [[waiting("logistics"), "waiting"], [toBook, "to book"]]);
   }
 
   return { html, mount, live };
@@ -775,7 +839,7 @@ const homeView = () => ({ html: `<section class="home">
     <h1>From order to truck, every team on the same page.</h1>
     <div class="two-doors">
       <a class="door door-cust" href="${link("customer")}"><span class="door-name">Customer HQ</span><span class="door-line">Order and change</span></a>
-      <a class="door" href="${link("orders")}"><span class="door-name">Ball HQ</span><span class="door-line">Accept, book, plan</span></a>
+      <a class="door" href="${hubLink("sales", "orders")}"><span class="door-name">Ball HQ</span><span class="door-line">Accept, book, plan</span></a>
     </div>
   </section>` });
 
@@ -783,28 +847,31 @@ const homeView = () => ({ html: `<section class="home">
 async function main() {
   const asked = PARAMS.get("role");
   let role = asked in ALIASES ? ALIASES[asked] : asked;
-  if (role !== "customer" && !BALL[role]) role = null;
-  const portal = role === "customer" ? "customer" : role ? "ball" : "home";
+  const allTabs = new Set(Object.values(HUBS).flatMap((h) => Object.keys(h.tabs)));
+  const portal = role === "customer" ? "customer" : allTabs.has(role) || HUBS[PARAMS.get("hub")] ? "ball" : "home";
   const custTab = PARAMS.get("tab") === "pos" ? "pos" : "order";
+  // Which hub: ?hub=, else an old department link (?role=sales), else the only hub with that tab, else the last one used.
+  const saved = localStorage.getItem("bc_dept");
+  const hub = HUBS[PARAMS.get("hub")] ? PARAMS.get("hub")
+    : TEAMS.includes(asked) ? asked
+    : allTabs.has(role) && Object.keys(HUBS).filter((k) => HUBS[k].tabs[role]).length === 1 ? Object.keys(HUBS).find((k) => HUBS[k].tabs[role])
+    : HUBS[saved] && (!role || HUBS[saved].tabs[role]) ? saved : "sales";
+  if (portal === "ball" && !HUBS[hub].tabs[role]) role = Object.keys(HUBS[hub].tabs)[0];
   document.body.dataset.portal = portal;
   document.body.dataset.role = role || "home";
-  // Who's using it: a department (Ball) or a company (customer). Old links like ?role=sales pick the department.
-  const savedDept = localStorage.getItem("bc_dept");
-  const state = { items: [], refresh: null,
-    dept: TEAMS.includes(asked) ? asked : asked === "logistics" || ((role === "calendar" || role === "transfers" || role === "outlook") && !savedDept) ? "logistics"
-      : role === "exec" && !savedDept ? "exec" : DEPT[savedDept] ? savedDept : "sales",
+  const state = { items: [], refresh: null, dept: hub,
     company: SIM_CUSTOMERS[localStorage.getItem("bc_company")] ? localStorage.getItem("bc_company") : "Cincinnati, OH" };
-  if (portal === "ball") { localStorage.setItem("bc_dept", state.dept); localStorage.setItem("bc_tab", role); }
+  if (portal === "ball") { localStorage.setItem("bc_dept", hub); localStorage.setItem("bc_tab", role); }
 
   $("#brand").textContent = portal === "customer" ? "Customer HQ" : portal === "ball" ? "Ball HQ" : "Ball · Findlay pilot";
   $("#brand").href = portal === "customer" ? link("customer") : "./" + link("").replace(/^\?role=&?/, "?").replace(/^\?$/, "");
-  // One click between the two portals; Ball HQ reopens the tab you were last on.
-  const ballTab = BALL[localStorage.getItem("bc_tab")] ? localStorage.getItem("bc_tab") : "orders";
+  // One click between the two portals; Ball HQ reopens the hub and tab you were last on.
+  const lastHub = HUBS[saved] ? saved : "sales";
+  const lastTab = HUBS[lastHub].tabs[localStorage.getItem("bc_tab")] ? localStorage.getItem("bc_tab") : Object.keys(HUBS[lastHub].tabs)[0];
   const switcher = portal === "home" ? "" : `<nav class="switch" aria-label="Switch portal">
-    <a href="${link("customer")}" class="${portal === "customer" ? "on" : ""}">Customer HQ</a><a href="${link(ballTab)}" class="${portal === "ball" ? "on" : ""}">Ball HQ</a></nav>`;
+    <a href="${link("customer")}" class="${portal === "customer" ? "on" : ""}">Customer HQ</a><a href="${hubLink(lastHub, lastTab)}" class="${portal === "ball" ? "on" : ""}">Ball HQ</a></nav>`;
   $("#who").innerHTML = switcher + (portal === "customer"
-    ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>`
-    : portal === "ball" ? `<select id="who-sel" aria-label="Department">${Object.entries(DEPT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` : "");
+    ? `<select id="who-sel" aria-label="Company">${Object.entries(SIM_CUSTOMERS).map(([d, c]) => `<option value="${esc(d)}">${esc(c.name)}</option>`).join("")}</select>` : "");
 
   const store = withForecasts(await makeStore());
   const drawNav = (items = []) => {
@@ -815,19 +882,20 @@ async function main() {
       return;
     }
     if (portal !== "ball") { $("#nav").innerHTML = ""; return; }
-    const mine = TEAMS.includes(state.dept) ? orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[state.dept]).length : 0;
-    const isLog = state.dept === "logistics";
-    const count = { outlook: isLog ? E.warnings(items, NOW).length : 0, orders: mine, calendar: isLog ? E.toBookItems(items, NOW).length : 0 };
-    $("#nav").innerHTML = Object.entries(BALL).map(([r, name]) =>
-      `<a href="${link(r)}" class="${r === role ? "on" : ""}">${name}${count[r] ? ` <span class="count">${count[r]}</span>` : ""}</a>`).join("");
+    // Hubs across the top (with what's waiting on each); the hub's own tabs underneath.
+    const waiting = (d) => (TEAMS.includes(d) ? orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[d]).length : 0);
+    const tabCount = (d, t) => (t === "orders" ? waiting(d) : d !== "logistics" ? 0 : t === "outlook" ? E.warnings(items, NOW).length : t === "calendar" ? E.toBookItems(items, NOW).length : 0);
+    const hubCount = (d) => Object.keys(HUBS[d].tabs).reduce((s, t) => s + tabCount(d, t), 0);
+    const badge = (n) => (n ? ` <span class="count">${n}</span>` : "");
+    $("#nav").innerHTML = Object.entries(HUBS).map(([d, h]) =>
+      `<a href="${hubLink(d, h.tabs[role] ? role : Object.keys(h.tabs)[0])}" class="${d === hub ? "on" : ""}">${h.name}${badge(hubCount(d))}</a>`).join("");
+    const tabs = Object.entries(HUBS[hub].tabs);
+    $("#subnav").hidden = tabs.length < 2;
+    $("#subnav").innerHTML = tabs.map(([t, name]) => `<a href="${hubLink(hub, t)}" class="${t === role ? "on" : ""}">${name}${badge(tabCount(hub, t))}</a>`).join("");
   };
   if ($("#who-sel")) {
-    $("#who-sel").value = portal === "customer" ? state.company : state.dept;
-    $("#who-sel").addEventListener("change", (e) => {
-      if (portal === "customer") { state.company = e.target.value; localStorage.setItem("bc_company", state.company); }
-      else { state.dept = e.target.value; localStorage.setItem("bc_dept", state.dept); }
-      state.refresh();
-    });
+    $("#who-sel").value = state.company;
+    $("#who-sel").addEventListener("change", (e) => { state.company = e.target.value; localStorage.setItem("bc_company", state.company); state.refresh(); });
   }
   drawNav();
   const notes = [];
@@ -844,7 +912,7 @@ async function main() {
       location.search = q.toString().replace(/local=(&|$)/, "local$1");
     });
   }
-  document.title = portal === "customer" ? `${CUST_TABS[custTab]} · Customer HQ` : portal === "ball" ? `${BALL[role]} · Ball HQ` : "Ball · Findlay pilot";
+  document.title = portal === "customer" ? `${CUST_TABS[custTab]} · Customer HQ` : portal === "ball" ? `${HUBS[hub].tabs[role]} · ${HUBS[hub].name} · Ball HQ` : "Ball · Findlay pilot";
 
   const view = portal === "home" ? homeView()
     : portal === "customer" ? customerView(store, state, custTab)
@@ -852,6 +920,8 @@ async function main() {
     : role === "orders" ? ordersView(store, state)
     : role === "calendar" ? calendarView(store, state)
     : role === "transfers" ? transfersView(store, state)
+    : role === "stock" ? stockView()
+    : role === "line" ? lineView()
     : execView(store, state);
   $("#app").innerHTML = view.html;
   view.mount?.();

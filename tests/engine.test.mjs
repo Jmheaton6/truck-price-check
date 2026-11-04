@@ -62,29 +62,30 @@ test("answers can change until the trucks are booked", () => {
   assert.equal(E.decide([booked], booked, "sales", false, AT, NOW), null);
 });
 
-test("3-day rule: booked 3+ days ahead is contract, however many trucks", () => {
+test("3-day rule: booked 3+ days ahead is contract, however many trucks; inside 3 days, spot", () => {
   const tr = transfer("Mississauga, ON", 40, "2026-11-09");
   assert.deepEqual(((a) => [a.contract, a.spot])(E.allocate([tr], NOW).get(tr.id)), [40, 0]);
-  const late = transfer("Mississauga, ON", 12, "2026-11-07"); // 2 days out: only the 1 truck still scheduled that week
-  assert.deepEqual(((a) => [a.contract, a.spot])(E.allocate([late], NOW).get(late.id)), [1, 11]);
+  const late = transfer("Mississauga, ON", 12, "2026-11-07");
+  assert.deepEqual(((a) => [a.contract, a.spot])(E.allocate([late], NOW).get(late.id)), [0, 12]);
+  const nextDay = po("Cincinnati, OH", 10, "2026-11-06", "confirmed"); // Joe's test: a PO for tomorrow
+  assert.deepEqual(((a) => [a.contract, a.spot])(E.allocate([nextDay], NOW).get(nextDay.id)), [0, 10]);
 });
 
-test("inside 3 days: the planned forecast's trucks are contract, the rest spot", () => {
-  const p = po("Columbus, OH", 7, "2026-11-07", "confirmed"); // PepsiCo's plan this week: 5
-  const a = E.allocate([p], NOW).get(p.id);
-  assert.deepEqual([a.contract, a.spot, a.scheduled], [5, 2, 5]);
-  const other = po("Columbus, OH", 6, "2026-11-16", "confirmed"); // arrives first: uses the week's 6 planned trucks
-  const bl = po("Columbus, OH", 3, "2026-11-20", "confirmed");
-  const bookedLate = { ...bl, data: { ...bl.data, booked: { "2026-11-20": "2026-11-19T12:00:00" } } };
-  assert.equal(E.allocate([other, bookedLate], NOW).get(bookedLate.id).spot, 3); // booked 1 day ahead
+test("booking date counts: booked 1 day ahead is spot, booked 15 days ahead is contract", () => {
+  const mk = (bookedOn) => { const x = po("Columbus, OH", 3, "2026-11-20", "confirmed"); return { ...x, data: { ...x.data, booked: { "2026-11-20": bookedOn + "T12:00:00" } } }; };
+  const late = mk("2026-11-19"), early = mk("2026-11-05");
+  assert.equal(E.allocate([late], NOW).get(late.id).spot, 3);
+  assert.equal(E.allocate([early], NOW).get(early.id).spot, 0);
 });
 
-test("a late order rides trucks pre-booked from the outlook", () => {
+test("a late order rides only trucks Logistics pre-booked", () => {
   const later = "2026-11-30"; // rehearse a later day: Coca-Cola orders 14 for Dec 1
   const order = po("Cincinnati, OH", 14, "2026-12-01", "confirmed");
-  assert.deepEqual(((a) => [a.contract, a.spot])(E.allocate([order], later).get(order.id)), [8, 6]);
-  const pre = { id: "pb", type: "ask", status: "yes", created_at: ts(), data: { kind: "order", destination: "Cincinnati, OH", week: "2026-11-29", date: "2026-11-29", trucks: 6, accepted: 6, on: NOW } };
-  assert.deepEqual(((a) => [a.contract, a.spot])(E.allocate([pre, order], later).get(order.id)), [14, 0]);
+  const pre = (n) => ({ id: "pb" + n, type: "ask", status: "yes", created_at: ts(), data: { kind: "order", destination: "Cincinnati, OH", week: "2026-11-29", date: "2026-11-29", trucks: n, accepted: n, on: NOW } });
+  const got = (items) => ((a) => [a.contract, a.spot])(E.allocate(items, later).get(order.id));
+  assert.deepEqual(got([order]), [0, 14]);
+  assert.deepEqual(got([pre(14), order]), [14, 0]);
+  assert.deepEqual(got([pre(6), order]), [6, 8]);
 });
 
 test("calendar: accepted trucks to book; checking ones shown apart", () => {
@@ -100,29 +101,29 @@ test("calendar: accepted trucks to book; checking ones shown apart", () => {
   assert.equal(list.reduce((s, x) => s + x.contract + x.spot, 0), 22);
 });
 
-test("savings vs. the old way: denied change and transfers planned ahead", () => {
+test("savings: old way = each lane's 2026 spot rate on the same freight, plus denied orders shipped anyway", () => {
   const p = allAccept([], po("Cincinnati, OH", 10, "2026-11-19"));
   const ch = { ...change(p, 4), status: "declined" };
   const retry = allAccept([p, ch], { ...change(p, 4, "waiting", { date: "2026-11-22", retry_of: ch.id }) });
   const tr = transfer("Mississauga, ON", 12, "2026-11-09");
   const items = [p, ch, retry, tr];
-  const now = E.totals(items, NOW), old = E.totals(items, NOW, { oldWay: true });
+  const now = E.totals(items, NOW), old = E.oldWay(items);
+  const mis = E.laneOf("transfer", "Mississauga, ON");
   assert.deepEqual([now.trucks, now.spot], [26, 0]);
-  assert.deepEqual([old.trucks, old.spot], [26, 9]);   // old way hears 1–3 days out: +4 past Coca-Cola's plan, 5 past Mississauga's
+  assert.equal(old.trucks, 26);                                  // 10 + the denied 4 + 12; the retry isn't counted twice
+  assert.ok(Math.abs(old.spot - (14 * cin().spot_share + 12 * mis.spot_share)) < 1e-9);
   const by = E.savingsBy(items, NOW);
-  assert.equal(by.checkoff, 4 * cin().spot_premium);
-  assert.equal(by.transfers, 5 * E.laneOf("transfer", "Mississauga, ON").spot_premium);
-  assert.equal(by.checkoff + by.bookAhead + by.transfers + by.warning, old.overspend - now.overspend);
+  assert.ok(Math.abs(by.orders - 14 * cin().spot_share * cin().spot_premium) < 1e-6);
+  assert.ok(Math.abs(by.orders + by.transfers - (old.overspend - now.overspend)) < 1e-6);
 });
 
 test("cuts free trucks; a cut inside the freeze strands cans", () => {
   const base = po("Columbus, OH", 6, "2026-11-17", "confirmed");
   const after = po("Columbus, OH", 4, "2026-11-18");
-  assert.equal(E.allocate([base, after], NOW).get(after.id).scheduled, 0);   // the week's 6 planned trucks are used
   const cut = change(base, -4, "confirmed");
   const a = E.allocate([base, cut, after], NOW);
   assert.equal(a.get(base.id).trucks, 2);          // the cut shrinks the order itself
-  assert.equal(a.get(after.id).scheduled, 4);
+  assert.equal(a.get(after.id).contract, 4);
   const near = po("Cincinnati, OH", 4, "2026-11-08", "confirmed");
   const nearCut = change(near, -2);
   assert.equal(E.checks([near, nearCut], nearCut, NOW).inventory.ok, false);
@@ -162,15 +163,15 @@ test("versions: the baseline stays, the latest wins, history is kept", () => {
   const v = E.forecastVersions(items, "Cincinnati, OH", 3, NOW);
   assert.deepEqual(v.map((x) => x.trucks), [8, 12, 14]);
   const w = wkOf(items, "Cincinnati, OH", 3);
-  assert.deepEqual([w.base, w.latest, w.change, w.zone, w.gap], [8, 14, 6, "R", 6]);
+  assert.deepEqual([w.base, w.latest, w.change, w.zone, w.gap], [8, 14, 6, "R", 14]); // nothing pre-booked yet
 });
 
-test("a small, steady-looking change can still leave trucks open", () => {
+test("forecast trucks with nothing booked are open; a small change still shows up", () => {
   const f = fcast("Cincinnati, OH", "2026-11-15", 11); // plan 10 → 11: +10%, green
   const w = wkOf([f], "Cincinnati, OH", 2);
-  assert.equal(w.zone, "G");
-  assert.equal(w.gap, 1);
-  assert.equal(E.warnings([f], NOW)[0].n, 1);
+  assert.deepEqual([w.zone, w.gap], ["G", 11]);
+  assert.equal(E.warnings([f], NOW).find((x) => x.customer === "Cincinnati, OH" && x.wk === 2).n, 11); // book by Nov 12: within a week
+  assert.equal(E.warnings([], NOW).some((x) => x.wk === 4), false);  // far-off steady weeks wait
 });
 
 test("orders consume the forecast: need is the larger, not the sum", () => {
@@ -182,20 +183,20 @@ test("orders consume the forecast: need is the larger, not the sum", () => {
 test("early warning → pre-book the open trucks; an order booked ahead also covers its week", () => {
   const lane = cin();
   const f = fcast("Cincinnati, OH", "2026-11-22", 14);
-  assert.equal(wkOf([f], "Cincinnati, OH", 3).gap, 6);
-  assert.equal(wkOf([f, ask(lane, "2026-11-22", 6)], "Cincinnati, OH", 3).gap, 0);
-  assert.equal(wkOf([f, ask(lane, "2026-11-22", 4)], "Cincinnati, OH", 3).gap, 2);
+  assert.equal(wkOf([f], "Cincinnati, OH", 3).gap, 14);
+  assert.equal(wkOf([f, ask(lane, "2026-11-22", 14)], "Cincinnati, OH", 3).gap, 0);
+  assert.equal(wkOf([f, ask(lane, "2026-11-22", 10)], "Cincinnati, OH", 3).gap, 4);
   assert.equal(wkOf([f, po("Cincinnati, OH", 14, "2026-11-25", "confirmed")], "Cincinnati, OH", 3).gap, 0);
 });
 
-test("demand drops: trucks no one needs show up, and releasing them clears it", () => {
+test("demand drops after pre-booking: extra trucks show up, and releasing them clears it", () => {
   const lane = cin();
-  const f = fcast("Cincinnati, OH", "2026-11-22", 4);
-  const warn = E.warnings([f], NOW);
-  assert.deepEqual([warn[0].kind, warn[0].n], ["down", 4]);
-  const items = [f, ask(lane, "2026-11-22", -4)];
-  assert.equal(E.warnings(items, NOW).length, 0);
-  assert.equal(wkOf(items, "Cincinnati, OH", 3).cover, 4);
+  const items = [ask(lane, "2026-11-22", 8), fcast("Cincinnati, OH", "2026-11-22", 4)];
+  const warn = E.warnings(items, NOW).find((x) => x.customer === "Cincinnati, OH" && x.wk === 3);
+  assert.deepEqual([warn.kind, warn.n], ["down", 4]);
+  const after = [...items, ask(lane, "2026-11-22", -4)];
+  assert.equal(E.warnings(after, NOW).some((x) => x.customer === "Cincinnati, OH" && x.wk === 3), false);
+  assert.equal(wkOf(after, "Cincinnati, OH", 3).cover, 4);
 });
 
 test("the same PO with and without the warning (Nov 25, 14 truckloads)", () => {

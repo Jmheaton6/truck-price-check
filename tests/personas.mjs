@@ -111,7 +111,12 @@ async function task(fn) {
   if (P.clicks - before > LIMITS.clicks + 4) issue(`Took ${P.clicks - before} clicks.`);
 }
 // Ball HQ: pick my department from the header, like a person would.
-const iAm = (dept) => pick("Department", dept);
+const iAm = async (dept) => {
+  // Ball HQ: open my department's hub from the top bar, like a person would.
+  const l = page.locator("#nav a", { hasText: dept }).first();
+  if (!(await l.count())) { issue(`No "${dept}" hub in the top bar.`); throw new Error(`no hub ${dept}`); }
+  await l.click(); P.clicks++; step(`Opened the ${dept} hub`); await pause(500);
+};
 
 // ---------------- The day ----------------
 await go("?" + Q.slice(1));
@@ -266,10 +271,10 @@ await task(async () => {
   await go("?role=outlook" + Q);
   await iAm("Logistics");
   await look("outlook with warning");
-  await sees("6 open", "how many trucks aren't covered");
-  const book = page.getByRole("button", { name: /^Book \+/ });
-  if (!(await book.count())) { issue("Warning shows, but no way to book the trucks ahead."); throw new Error("no book"); }
-  await click((await book.first().textContent()).trim());
+  await sees("+75%", "the promo week flagged");
+  const all = page.getByRole("button", { name: /^Book all/ });
+  if (!(await all.count())) { issue("No way to book the forecast trucks ahead."); throw new Error("no book all"); }
+  await click((await all.first().textContent()).trim());
   if (!/pre-booked/i.test(await toastText())) issue("No confirmation after pre-booking.");
   await look("outlook covered");
   await sees("Covered", "the week is covered now");
@@ -290,11 +295,11 @@ for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Production"
     await click("Accept", { exact: true });
   });
 }
-persona("Bo (customer, PepsiCo buyer)", "forecast-down", "Our Dec 6 week is slow: drop it to 0.4 million cans.");
+persona("Bo (customer, PepsiCo buyer)", "forecast-down", "Our Nov 15 week is slow: drop it to 0.4 million cans.");
 await task(async () => {
   await go("?role=customer" + Q);
   await pick("Company", "PepsiCo");
-  await fill("week of Dec 6", 0.4);
+  await fill("week of Nov 15", 0.4);
   await click("Share forecast");
 });
 persona("Lee (Logistics)", "outlook-down", "A customer's demand dropped. Free up the trucks we won't need.");
@@ -383,8 +388,8 @@ persona("Sam (Sales)", "edge-perm", "Try to book trucks even though I'm in Sales
 await task(async () => {
   await go("?role=calendar" + Q);
   await iAm("Sales");
+  if (await page.locator("#subnav a", { hasText: "Trucks" }).count()) issue("The Sales hub has a Trucks tab.");
   if (await page.getByRole("button", { name: /^Book/ }).count()) issue("Sales can see Book buttons.");
-  await sees("Logistics books these", "who books trucks");
 });
 
 persona("Erin (Executive)", "exec", "See how each department is doing and what we saved vs. the spot we're still paying for.");

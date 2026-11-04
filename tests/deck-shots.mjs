@@ -16,7 +16,7 @@ const b = await chromium.launch();
 const p = await (await b.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 })).newPage();
 const go = async (q) => { await p.goto(BASE + q); await p.addStyleTag({ content: "#mode-banner{display:none!important}.toast{display:none!important}#x-reset{display:none!important}" }); await p.waitForTimeout(600); };
 const shot = (name) => p.screenshot({ path: join(OUT, `${name}.png`) });
-const dept = async (d) => { await p.selectOption("#who-sel", { label: d }); await p.waitForTimeout(350); };
+const dept = async (d) => { await p.locator("#nav a", { hasText: d }).first().click(); await p.waitForTimeout(500); };
 const btn = async (name, exact = true) => { await p.getByRole("button", { name, exact }).first().click(); await p.waitForTimeout(450); };
 const bookAll = async () => { const all = p.getByRole("button", { name: /^Book all/ }); if (await all.count()) await all.first().click(); else await p.getByRole("button", { name: "Book", exact: true }).first().click(); await p.waitForTimeout(450); };
 const answerAll = async () => { for (const d of ["Sales", "Inventory", "Production", "Logistics"]) { await go("?role=orders" + Q); await dept(d); const bad = await p.locator(".d-mine .d-check.bad").count(); await btn(bad ? "Deny" : "Accept"); } };
@@ -62,7 +62,7 @@ await bookAll();
 await go("?role=customer" + Q); await p.selectOption("#who-sel", { label: "Coca-Cola" }); await p.waitForTimeout(300);
 await p.fill('[data-fw="4"]', "2.8"); await p.dispatchEvent('[data-fw="4"]', "input"); await btn("Share forecast");
 await go("?role=outlook" + Q); await dept("Logistics"); await shot("14 Outlook - warning");
-await p.getByRole("button", { name: /^Book \+/ }).first().click(); await p.waitForTimeout(450);
+await p.getByRole("button", { name: /^Book all/ }).first().click(); await p.waitForTimeout(450);
 await shot("15 Outlook - pre-booked");
 
 // 7. Executive

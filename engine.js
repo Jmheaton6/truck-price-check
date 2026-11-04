@@ -1,8 +1,8 @@
 // Ball Findlay pilot: all the logic, no screens. app.js draws it; tests/engine.test.mjs checks it.
 //
 // One rule runs everything: a truck booked 3+ days before it moves is a contract truck, however many there are.
-// Inside 3 days it's spot, unless that week still has trucks scheduled ahead of time (the forecast the carrier
-// already planned for, plus anything Logistics pre-booked from the outlook).
+// Inside 3 days it's spot. The only way around that is a truck Logistics pre-booked from the outlook (3+ days
+// ahead) for that customer's week: a late order can ride it.
 import { LANES } from "./lanes.js";
 
 export const RULES = {
@@ -138,27 +138,21 @@ export function preBooked(items, now) {
   }
   return out;
 }
-// Trucks already scheduled for a lane-week: what the carrier planned for this freight (customer lanes: the
-// customer's planned forecast; transfer lanes: the weekly average minus Ball's other moves), plus pre-bookings.
-export const scheduled = (lane, wk, pre) => Math.max(0, lane.perWeek - bookedTrucks(lane, wk) + (pre.get(`${lane.key}|${wk}`) || 0));
+// Trucks pre-booked for a lane-week. Nothing is lined up unless Logistics booked it.
+export const scheduled = (lane, wk, pre) => Math.max(0, pre.get(`${lane.key}|${wk}`) || 0);
 
 // Spot cost. Customer order: freight to the customer is in the $3,100, so a spot truck costs its premium.
 // Transfer: Ball pays the whole move, and a spot truck adds the premium on top.
 export const overspend = (lane, spot) => spot * lane.spot_premium;
 
 // ---------- Who gets contract trucks ----------
-// Each move first uses the trucks already scheduled that week (first come, first served): those are contract.
+// Each move first uses trucks pre-booked for its week (first come, first served): those are contract.
 // The rest are contract if Logistics books them 3+ days before they move; otherwise spot.
 // Booking: data.booked = { "YYYY-MM-DD": timestamp }.
-// opts.oldWay: the same freight without the system. Four levers, which can also be set one at a time:
-//   oldOrders (every order accepted as first asked, denied ones too), lateOrders / lateTransfers (Logistics hears
-//   about it 1–3 days before it moves, so anything past the scheduled trucks goes spot), noPrebook (no outlook).
-const leversOf = (opts) => (opts.oldWay ? { oldOrders: true, lateOrders: true, lateTransfers: true, noPrebook: true } : opts);
 const orderCounts = (it, old) => (old ? !it.data.retry_of && it.status !== "waiting" : it.status !== "declined");
-export function allocate(items, now, opts = {}) {
-  const L = leversOf(opts);
-  const list = items.filter((it) => (it.type === "order" && orderCounts(it, L.oldOrders)) || (it.type === "transfer" && isActive(it))).sort(byCreated);
-  const pre = L.noPrebook ? new Map() : preBooked(items, now);
+export function allocate(items, now) {
+  const list = items.filter((it) => (it.type === "order" && orderCounts(it, false)) || (it.type === "transfer" && isActive(it))).sort(byCreated);
+  const pre = preBooked(items, now);
   const used = new Map();
   // An accepted cut shrinks the order it cuts (same date), so those trucks are never booked.
   const cutOf = new Map();
@@ -178,9 +172,8 @@ export function allocate(items, now, opts = {}) {
     const key = `${lane.key}|${wk}`;
     const fromScheduled = Math.min(trucks, Math.max(0, scheduled(lane, wk, pre) - (used.get(key) || 0)));
     used.set(key, (used.get(key) || 0) + fromScheduled);
-    const late = it.type === "order" ? L.lateOrders : L.lateTransfers;
     const bookedOn = it.data.booked?.[day] ? dayOfTs(it.data.booked[day]) : null;
-    const ahead = !late && daysBetween(bookedOn || now, day) >= RULES.noticeDays;
+    const ahead = daysBetween(bookedOn || now, day) >= RULES.noticeDays;
     const contract = fromScheduled + (ahead ? trucks - fromScheduled : 0);
     const spot = trucks - contract;
     const days = [{ day, wk, n: trucks, contract, spot, scheduled: fromScheduled, why: spot ? "late" : null, booked: !!bookedOn }];
@@ -227,7 +220,7 @@ export function checks(items, it, now) {
     .reduce((sum, x) => sum + x.data.trucks, 0);
   const max = fc + Math.max(1, Math.round(fc * RULES.flexBand));
   const daysOut = daysBetween(now, dateOf(it));
-  const sales = daysOut < RULES.noticeDays ? { ok: false, verdict: `Only ${daysOut} days out` }
+  const sales = daysOut < RULES.noticeDays ? { ok: false, verdict: `Only ${daysOut} ${daysOut === 1 ? "day" : "days"} out` }
     : weekTotal > max ? { ok: false, verdict: `Forecast ${fc}: ${weekTotal} is over` }
     : { ok: true, verdict: `Forecast ${fc}: ${weekTotal} fits` };
 
@@ -329,17 +322,30 @@ export function toBook(items, now) {
 }
 
 // ---------- Executive ----------
-// Spot and savings on the pilot's own freight (accepted orders and transfers) vs. the same freight the old way.
-export function totals(items, now, opts = {}) {
-  const alloc = allocate(items, now, opts);
-  const L = leversOf(opts);
-  const counted = (it) => (it.type === "transfer" && isActive(it)) || (it.type === "order" && (L.oldOrders ? it.status !== "waiting" && !it.data.retry_of : it.status === "confirmed"));
-  const t = { trucks: 0, contract: 0, spot: 0, overspend: 0 };
+// Spot and savings on the pilot's own freight (accepted orders and transfers).
+// Now: what the 3-day rule gives. The old way: the same freight, plus every order accepted as first asked
+// (denied ones too, no retries), moving at each lane's actual 2026 spot rate (Ball's workbook).
+export function totals(items, now) {
+  const alloc = allocate(items, now);
+  const t = { trucks: 0, contract: 0, spot: 0, overspend: 0, byType: { order: 0, transfer: 0 } };
   for (const it of items) {
     const a = alloc.get(it.id);
-    if (!a || a.trucks < 0 || !counted(it)) continue;
-    t.trucks += a.trucks; t.contract += a.contract; t.spot += a.spot; t.overspend += a.overspend;
+    if (!a || a.trucks < 0 || !(it.type === "transfer" || it.status === "confirmed")) continue;
+    t.trucks += a.trucks; t.contract += a.contract; t.spot += a.spot; t.overspend += a.overspend; t.byType[it.type] += a.overspend;
   }
+  t.spotShare = t.trucks ? t.spot / t.trucks : 0;
+  return t;
+}
+export function oldWay(items) {
+  const t = { trucks: 0, spot: 0, overspend: 0, byType: { order: 0, transfer: 0 } };
+  for (const it of items) {
+    const counts = it.type === "transfer" ? isActive(it) : it.type === "order" && orderCounts(it, true) && it.data.trucks > 0;
+    const lane = counts && itemLane(it);
+    if (!lane) continue;
+    const spot = it.data.trucks * lane.spot_share;
+    t.trucks += it.data.trucks; t.spot += spot; t.overspend += spot * lane.spot_premium; t.byType[it.type] += spot * lane.spot_premium;
+  }
+  t.contract = t.trucks - t.spot;
   t.spotShare = t.trucks ? t.spot / t.trucks : 0;
   return t;
 }
@@ -387,27 +393,17 @@ export function toBookItems(items, now) {
   return out.sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : 0));
 }
 
-// Where the savings came from: start from the old way and switch the system on one piece at a time.
-// Each piece gets the spot cost it removed, so the pieces add up to the total saved.
+// Where the savings came from: customer orders and transfers, old way minus now.
 export function savingsBy(items, now) {
-  const steps = [["checkoff", "oldOrders"], ["bookAhead", "lateOrders"], ["transfers", "lateTransfers"], ["warning", "noPrebook"]];
-  let on = { oldOrders: true, lateOrders: true, lateTransfers: true, noPrebook: true };
-  let prev = totals(items, now, on).overspend;
-  const out = {};
-  for (const [name, lever] of steps) {
-    on = { ...on, [lever]: false };
-    const cur = totals(items, now, on).overspend;
-    out[name] = Math.max(0, prev - cur);
-    prev = cur;
-  }
-  return out;
+  const old = oldWay(items), cur = totals(items, now);
+  return { orders: Math.max(0, old.byType.order - cur.byType.order), transfers: Math.max(0, old.byType.transfer - cur.byType.transfer) };
 }
 
 // ---------- Forecast early warning ----------
 // Per customer, per week: forecast movement (baseline vs. latest) and truck coverage, kept apart, so a steady
 // forecast never hides trucks nobody has covered. Orders consume the forecast: the week needs the larger of the two.
 // Covered = trucks scheduled ahead (planned forecast + pre-booked) + accepted orders' trucks booked 3+ days ahead.
-// Open = forecast trucks with nothing behind them: if they come as late orders, they go spot. Pre-book them.
+// Open = forecast trucks with nothing booked behind them: if they come as late orders, they go spot. Pre-book them.
 export function outlook(items, now) {
   const pre = preBooked(items, now);
   const alloc = allocate(items, now);
@@ -437,8 +433,9 @@ export function outlook(items, now) {
 export function warnings(items, now) {
   const out = [];
   for (const row of outlook(items, now)) for (const w of row.weeks) {
-    if (w.gap) out.push({ ...w, lane: row.lane, customer: row.customer, kind: "up", n: w.gap });
-    else if (w.surplus && w.latest < w.base) out.push({ ...w, lane: row.lane, customer: row.customer, kind: "down", n: w.surplus });
+    const soon = daysBetween(now, w.bookBy) <= 7;
+    if (w.gap && w.canBook && (soon || w.zone !== "G")) out.push({ ...w, lane: row.lane, customer: row.customer, kind: "up", n: w.gap });
+    else if (w.surplus && w.canBook) out.push({ ...w, lane: row.lane, customer: row.customer, kind: "down", n: w.surplus });
   }
-  return out.sort((a, b) => a.wk - b.wk || (b.zone === "R") - (a.zone === "R"));
+  return out.sort((a, b) => (a.bookBy < b.bookBy ? -1 : a.bookBy > b.bookBy ? 1 : 0) || (b.zone === "R") - (a.zone === "R"));
 }
