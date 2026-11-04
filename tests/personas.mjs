@@ -252,6 +252,88 @@ await task(async () => {
   await click("Accept", { exact: true });
 });
 
+// ---------- Harder days ----------
+persona("Cy (customer, Customer C buyer)", "edge-late", "Rush: order 0.4 million cans for Sat Nov 7 (2 days out).");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await pick("Company", "Customer C");
+  await fill("Million cans", 0.4);
+  await fill("Deliver on", "2026-11-07");
+  await click("Send order");
+});
+persona("Sam (Sales)", "edge-sales", "Deny the rush order, then change my mind and accept it.");
+await task(async () => {
+  await go("?role=orders" + Q);
+  await iAm("Sales");
+  await look("rush order");
+  await sees("Only 2 days out", "why the rush is a problem");
+  await click("Deny", { exact: true });
+  await click("All", { exact: true });
+  await sees("Denied", "the order now shows denied");
+  await click("Accept", { exact: true });
+  await sees("1/4 accepted", "the order back in play");
+});
+persona("Cy (customer, Customer C buyer)", "edge-late2", "Check my rush order.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await look("rush status");
+  await sees("Checking", "my rush order is being checked");
+});
+persona("Pat (customer, Customer A buyer)", "edge-cut", "Demand dropped: cut the booked Nov 19 order to 1.6 million cans.");
+await task(async () => {
+  await go("?role=customer" + Q);
+  await pick("Company", "Customer A");
+  const cards = page.locator(".card", { hasText: "Thu, Nov 19" });
+  await cards.first().getByRole("button", { name: "Change" }).click(); P.clicks++; await pause();
+  await fill("Million cans", 1.6);
+  await sees("−2", "the cut in truckloads");
+  await click("Send change");
+});
+for (const dept of ["Sales", "Inventory", "Production", "Logistics"]) {
+  persona(`${dept} team`, `edge-cut-${dept.toLowerCase()}`, "Answer the cut.");
+  await task(async () => {
+    await go("?role=orders" + Q);
+    await iAm(dept);
+    await look(`cut ${dept}`);
+    step(`Open order: ${(await page.locator("#o-detail .d-what").textContent().catch(() => "none")).trim()}`);
+    if (await page.getByText("Nothing waiting on you").isVisible().catch(() => false)) { step("Nothing waiting on me"); return; }
+    const bad = await page.locator(".d-mine .d-check.bad").count();
+    await click(bad ? "Deny" : "Accept", { exact: true });
+  });
+}
+persona("Lee (Logistics)", "edge-transfer", "Ship 10 to Adairsville all on Fri Nov 20, see the spot, and fix what I can.");
+await task(async () => {
+  await go("?role=transfers" + Q);
+  await iAm("Logistics");
+  await pick("To", "Adairsville, GA");
+  await fill("Truckloads", 10);
+  await fill("Start", "2026-11-20");
+  await click("All on one day");
+  await click("Put on calendar");
+  await click("Trucks", { role: "link" });
+  await look("calendar with spot");
+  await click("Adairsville Transfer", { exact: false, scrollOk: true });   // its row in "To book"
+  await look("spot day");
+  const ask = page.getByRole("button", { name: /^Ask carrier/ });
+  if (!(await ask.count())) issue("Red spot day with 15 days' notice, but no Ask carrier.");
+  else { await click((await ask.first().textContent()).trim()); step(`Carrier said: ${await toastText()}`); }
+  await look("after ask");
+});
+persona("Lee (Logistics)", "edge-remove", "Changed my mind: remove the Adairsville transfer.");
+await task(async () => {
+  await click("Transfers", { role: "link" });
+  const before = await page.locator("#p-list li").count();
+  await click("Remove", { exact: true });
+  if ((await page.locator("#p-list li").count()) !== before - 1) issue("Remove didn't take the transfer off the list.");
+});
+persona("Sam (Sales)", "edge-perm", "Try to book trucks even though I'm in Sales.");
+await task(async () => {
+  await go("?role=calendar" + Q);
+  await iAm("Sales");
+  if (await page.getByRole("button", { name: /^Book/ }).count()) issue("Sales can see Book buttons.");
+  await sees("Logistics books these", "who books trucks");
+});
+
 persona("Erin (Executive)", "exec", "See how each department is doing and what we saved vs. the spot we're still paying for.");
 await task(async () => {
   await go("?role=exec" + Q);
@@ -264,6 +346,7 @@ await task(async () => {
   void s;
 });
 
+const finalData = await page.evaluate(() => JSON.parse(localStorage.getItem("bc_items_v3") || "[]"));
 if (errors.length) report.push({ name: "Browser errors", role: "errors", goal: "", steps: errors, screens: [], issues: errors.map((e) => "JS error: " + e), clicks: 0, done: false });
 await browser.close();
 
@@ -277,6 +360,8 @@ for (const p of report) {
   lines.push("**What I did:**", ...p.steps.map((s) => `- ${s}`), "");
   if (p.screens.length) lines.push("**Screens:**", ...p.screens.map((s) => `- ${s.label}: ${s.words} words, longest line ${s.longestN} words, main button ${s.ctaAbove ? "visible" : s.ctas ? "below the fold" : "none"} · \`${s.file}\``), "");
 }
+lines.push("## Final data", "| # | Type | Status | What | Date | Booked days |", "|---|---|---|---|---|---|",
+  ...finalData.map((r, i) => `| ${i + 1} | ${r.type}${r.data.kind ? " " + r.data.kind : ""} | ${r.status} | ${r.data.customer || r.data.destination || ""} ${r.data.trucks ?? ""}${r.data.parent ? ` (of #${finalData.findIndex((x) => String(x.id) === String(r.data.parent)) + 1})` : ""} | ${r.data.date || ""} | ${Object.keys(r.data.booked || {}).length} |`));
 writeFileSync(join(HERE, "persona-report.md"), lines.join("\n"));
 const total = report.reduce((s, p) => s + p.issues.length, 0);
 console.log(report.map((p) => `${p.done ? "✓" : "✗"} ${p.name.padEnd(36)} clicks ${String(p.clicks).padStart(2)}  issues ${p.issues.length}`).join("\n"));

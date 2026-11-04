@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 1:23:48 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 1:33:22 AM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -22,6 +22,17 @@ Run: 11/4/2026, 1:23:48 AM · http://localhost:8765/ · backup mode, today = Thu
 | Ivy (Inventory) | Answer the new order. | yes | 2 | 0 |
 | Paolo (Production) | Answer the new order. | yes | 2 | 0 |
 | Lee (Logistics) | This order would need a spot truck. Avoid spot before I accept. | yes | 3 | 0 |
+| Cy (customer, Customer C buyer) | Rush: order 0.4 million cans for Sat Nov 7 (2 days out). | yes | 2 | 0 |
+| Sam (Sales) | Deny the rush order, then change my mind and accept it. | yes | 4 | 0 |
+| Cy (customer, Customer C buyer) | Check my rush order. | yes | 0 | 0 |
+| Pat (customer, Customer A buyer) | Demand dropped: cut the booked Nov 19 order to 1.6 million cans. | yes | 3 | 0 |
+| Sales team | Answer the cut. | yes | 2 | 0 |
+| Inventory team | Answer the cut. | yes | 2 | 0 |
+| Production team | Answer the cut. | yes | 2 | 0 |
+| Logistics team | Answer the cut. | yes | 2 | 0 |
+| Lee (Logistics) | Ship 10 to Adairsville all on Fri Nov 20, see the spot, and fix what I can. | yes | 7 | 0 |
+| Lee (Logistics) | Changed my mind: remove the Adairsville transfer. | yes | 2 | 0 |
+| Sam (Sales) | Try to book trucks even though I'm in Sales. | yes | 1 | 0 |
 | Erin (Executive) | See how each department is doing and what we saved vs. the spot we're still paying for. | yes | 1 | 0 |
 
 ## Pat (customer, Customer A buyer)
@@ -122,7 +133,7 @@ Run: 11/4/2026, 1:23:48 AM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Deny"
 
 **Screens:**
-- Sales change: 61 words, longest line 10 words, main button none · `14-sales2-sales-change.png`
+- Sales change: 60 words, longest line 10 words, main button none · `14-sales2-sales-change.png`
 
 ## Paolo (Production)
 *A change came in. Read my check and answer honestly.*
@@ -214,7 +225,127 @@ Run: 11/4/2026, 1:23:48 AM · http://localhost:8765/ · backup mode, today = Thu
 
 **Screens:**
 - order needing spot: 59 words, longest line 10 words, main button visible · `18-logistics4-order-needing-spot.png`
-- after asking carrier: 58 words, longest line 10 words, main button none · `19-logistics4-after-asking-carrier.png`
+- after asking carrier: 60 words, longest line 10 words, main button none · `19-logistics4-after-asking-carrier.png`
+
+## Cy (customer, Customer C buyer)
+*Rush: order 0.4 million cans for Sat Nov 7 (2 days out).*
+
+**What I did:**
+- Picked "Customer C" in "Company"
+- Typed 0.4 in "Million cans"
+- Typed 2026-11-07 in "Deliver on"
+- Clicked "Send order"
+
+## Sam (Sales)
+*Deny the rush order, then change my mind and accept it.*
+
+**What I did:**
+- Picked "Sales" in "Department"
+- Saw why the rush is a problem
+- Clicked "Deny"
+- Clicked "All"
+- Saw the order now shows denied
+- Clicked "Accept"
+- Saw the order back in play
+
+**Screens:**
+- rush order: 57 words, longest line 10 words, main button none · `20-edge-sales-rush-order.png`
+
+## Cy (customer, Customer C buyer)
+*Check my rush order.*
+
+**What I did:**
+- Saw my rush order is being checked
+
+**Screens:**
+- rush status: 35 words, longest line 3 words, main button visible · `21-edge-late2-rush-status.png`
+
+## Pat (customer, Customer A buyer)
+*Demand dropped: cut the booked Nov 19 order to 1.6 million cans.*
+
+**What I did:**
+- Picked "Customer A" in "Company"
+- Typed 1.6 in "Million cans"
+- Saw the cut in truckloads
+- Clicked "Send change"
+
+## Sales team
+*Answer the cut.*
+
+**What I did:**
+- Picked "Sales" in "Department"
+- Open order: Change: 10 → 8 truckloads · Thu, Nov 19
+- Clicked "Accept"
+
+**Screens:**
+- cut Sales: 55 words, longest line 10 words, main button none · `22-edge-cut-sales-cut-sales.png`
+
+## Inventory team
+*Answer the cut.*
+
+**What I did:**
+- Picked "Inventory" in "Department"
+- Open order: Change: 10 → 8 truckloads · Thu, Nov 19
+- Clicked "Accept"
+
+**Screens:**
+- cut Inventory: 61 words, longest line 10 words, main button none · `23-edge-cut-inventory-cut-inventory.png`
+
+## Production team
+*Answer the cut.*
+
+**What I did:**
+- Picked "Production" in "Department"
+- Open order: Change: 10 → 8 truckloads · Thu, Nov 19
+- Clicked "Accept"
+
+**Screens:**
+- cut Production: 61 words, longest line 10 words, main button none · `24-edge-cut-production-cut-production.png`
+
+## Logistics team
+*Answer the cut.*
+
+**What I did:**
+- Picked "Logistics" in "Department"
+- Open order: Change: 10 → 8 truckloads · Thu, Nov 19
+- Clicked "Accept"
+
+**Screens:**
+- cut Logistics: 61 words, longest line 10 words, main button none · `25-edge-cut-logistics-cut-logistics.png`
+
+## Lee (Logistics)
+*Ship 10 to Adairsville all on Fri Nov 20, see the spot, and fix what I can.*
+
+**What I did:**
+- Picked "Logistics" in "Department"
+- Picked "Adairsville, GA" in "To"
+- Typed 10 in "Truckloads"
+- Typed 2026-11-20 in "Start"
+- Clicked "All on one day"
+- Clicked "Put on calendar"
+- Clicked "Trucks"
+- Clicked "Adairsville Transfer"
+- Clicked "Ask carrier for +10"
+- Carrier said: Carrier: Only +5
+
+**Screens:**
+- calendar with spot: 89 words, longest line 14 words, main button visible · `26-edge-transfer-calendar-with-spot.png`
+- spot day: 77 words, longest line 7 words, main button visible · `27-edge-transfer-spot-day.png`
+- after ask: 83 words, longest line 7 words, main button visible · `28-edge-transfer-after-ask.png`
+
+## Lee (Logistics)
+*Changed my mind: remove the Adairsville transfer.*
+
+**What I did:**
+- Clicked "Transfers"
+- Clicked "Remove"
+
+## Sam (Sales)
+*Try to book trucks even though I'm in Sales.*
+
+**What I did:**
+- Picked "Sales" in "Department"
+- Saw who books trucks
 
 ## Erin (Executive)
 *See how each department is doing and what we saved vs. the spot we're still paying for.*
@@ -227,7 +358,21 @@ Run: 11/4/2026, 1:23:48 AM · http://localhost:8765/ · backup mode, today = Thu
 - Saw "Inventory"
 - Saw "Production"
 - Saw "Logistics"
-- Saved shows $9,334
+- Saved shows $8,410
 
 **Screens:**
-- executive: 67 words, longest line 7 words, main button none · `20-exec-executive.png`
+- executive: 67 words, longest line 7 words, main button none · `29-exec-executive.png`
+
+## Final data
+| # | Type | Status | What | Date | Booked days |
+|---|---|---|---|---|---|
+| 1 | order po | confirmed | Cincinnati, OH 10 | 2026-11-19 | 1 |
+| 2 | transfer | booked | Mississauga, ON 12 | 2026-11-09 | 12 |
+| 3 | order change | declined | Cincinnati, OH 4 (of #1) | 2026-11-19 | 0 |
+| 4 | order change | confirmed | Cincinnati, OH 4 (of #1) | 2026-11-22 | 0 |
+| 5 | order po | confirmed | Columbus, OH 6 | 2026-11-25 | 0 |
+| 6 | ask order | yes | Columbus, OH 1 | 2026-11-25 | 0 |
+| 7 | order po | waiting | Mertztown, PA 2 | 2026-11-07 | 0 |
+| 8 | order change | confirmed | Cincinnati, OH -2 (of #1) | 2026-11-19 | 0 |
+| 9 | transfer | declined | Adairsville, GA 10 | 2026-11-20 | 0 |
+| 10 | ask transfer | part | Adairsville, GA 10 | 2026-11-20 | 0 |

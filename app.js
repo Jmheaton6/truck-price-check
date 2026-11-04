@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=32";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=32";
+import * as E from "./engine.js?v=33";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=33";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, PATTERNS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -111,6 +111,15 @@ function showBroken(msg) {
 addEventListener("error", (e) => showBroken(e.message));
 addEventListener("unhandledrejection", (e) => showBroken(e.reason?.message || String(e.reason)));
 if (typeof E.calendar !== "function") showBroken("old copy of the app");
+
+// The carrier's last answer for a lane and week. After a partial yes or a no, there's nothing more to ask.
+function carrierSaid(items, lane, day) {
+  const wk = E.weekKey(day);
+  const last = items.filter((x) => x.type === "ask" && x.data.destination === lane.destination && x.data.kind === lane.kind && x.data.week === wk).at(-1);
+  if (!last) return { canAsk: true, text: "" };
+  const text = last.status === "yes" ? `Carrier added ${last.data.accepted}` : last.status === "part" ? `Carrier added ${last.data.accepted}: its limit that week` : "Carrier said no";
+  return { canAsk: last.status === "yes", text };
+}
 
 // Truck squares: one per truck. Contract booked = solid, contract to book = outline, spot = red, not accepted = dashed.
 function squares(moves, max = 14) {
@@ -234,7 +243,9 @@ function customerView(store, state) {
 // ---------- Ball HQ · Orders (every department accepts or denies) ----------
 function ordersView(store, state) {
   let selected = location.hash.slice(1) || null;
+  let pinned = selected;   // an order you picked or answered stays open; anything else follows your list
   let filter = "mine";
+  let deptSeen = state.dept;
   const html = `<div class="cols cols-orders">
     <section class="panel list"><div class="seg" id="o-filter"><button type="button" data-filter="mine">Waiting on me</button><button type="button" data-filter="all">All</button></div><div id="o-list"></div></section>
     <section class="panel" id="o-detail"></section>
@@ -245,7 +256,7 @@ function ordersView(store, state) {
       const f = e.target.closest("[data-filter]");
       if (f) { filter = f.dataset.filter; return live(state.items); }
       const pick = e.target.closest("[data-pick]");
-      if (pick) { selected = pick.dataset.pick; history.replaceState(null, "", "#" + selected); return live(state.items); }
+      if (pick) { selected = pinned = pick.dataset.pick; history.replaceState(null, "", "#" + selected); return live(state.items); }
       const ask = e.target.closest("button[data-ask]");
       if (ask) {
         ask.disabled = true;
@@ -265,6 +276,7 @@ function ordersView(store, state) {
       try {
         const fresh = await store.list(); // re-read so two departments answering at once don't overwrite each other
         const it = byId(fresh, b.dataset.id);
+        pinned = selected = b.dataset.id;
         const u = it && E.decide(fresh, it, b.dataset.decide, b.dataset.ok === "1", nowIso(), NOW);
         if (!u) return toast("Already booked.", true);
         await store.update(it.id, { status: u.status, data: u.data });
@@ -292,12 +304,13 @@ function ordersView(store, state) {
     const card = (t) => {
       const s = it.data.signoffs?.[t];
       const mine = state.dept === t;
-      const canAsk = t === "logistics" && c.alloc?.fixable > 0 && E.daysBetween(NOW, it.data.date) >= RULES.carrierFlexNoticeDays;
+      const said = t === "logistics" ? carrierSaid(items, E.itemLane(it), it.data.date) : null;
+      const canAsk = t === "logistics" && c.alloc?.fixable > 0 && E.daysBetween(NOW, it.data.date) >= RULES.carrierFlexNoticeDays && said.canAsk;
       return `<div class="dcard ${s ? (s.ok ? "d-yes" : "d-no") : ""}${mine ? " d-mine" : ""}">
         <p class="d-name">${DEPT[t]}</p>
         <p class="d-check ${c[t].ok ? "ok" : "bad"}">${icon(c[t].ok ? "check" : "x")}${esc(c[t].verdict)}</p>
-        ${t === "logistics" && mine && canAnswer && !s && c.alloc?.fixable > 0 && E.daysBetween(NOW, it.data.date) >= RULES.carrierFlexNoticeDays
-          ? `<button type="button" class="util on ask" data-ask="${c.alloc.fixable}" data-id="${esc(it.id)}">Ask carrier +${c.alloc.fixable}</button>` : ""}
+        ${said?.text ? `<p class="said">${esc(said.text)}</p>` : ""}
+        ${canAsk && mine && canAnswer && !s ? `<button type="button" class="util on ask" data-ask="${c.alloc.fixable}" data-id="${esc(it.id)}">Ask carrier +${c.alloc.fixable}</button>` : ""}
         ${mine && canAnswer ? `<div class="d-btns"><button type="button" class="util${s?.ok === true ? " on" : !s && c[t].ok ? " rec" : ""}" data-decide="${t}" data-ok="1" data-id="${esc(it.id)}">Accept</button>
             <button type="button" class="util${s?.ok === false ? " on-no" : !s && !c[t].ok && !canAsk ? " rec-no" : ""}" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
           : `<p class="d-status">${s ? (s.ok ? "Accepted" : "Denied") : "Waiting"}</p>`}
@@ -306,7 +319,8 @@ function ordersView(store, state) {
     const parent = isChange(it) ? byId(items, it.data.parent) : null;
     return `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${stageChip(it)}</div>
       <h1 class="detail-h">${esc(custName(it.data.customer))}</h1>
-      <p class="d-what">${whatOf(items, it)}${parent ? ` to ${plural(poTotal(items, parent), "truckload")}` : ""} · ${esc(fmtDate(it.data.date))}</p>
+      <p class="d-what">${parent ? (() => { const before = poTotal(items, parent) - (it.status === "confirmed" && it.data.date === parent.data.date ? it.data.trucks : 0);
+        return it.data.date === parent.data.date ? `Change: ${before} → ${plural(before + it.data.trucks, "truckload")}` : `Change: +${plural(it.data.trucks, "truckload")} more`; })() : whatOf(items, it)} · ${esc(fmtDate(it.data.date))}</p>
       <div class="dcards">${TEAMS.map(card).join("")}</div>
       ${st === "denied" && it.data.denied ? `<p class="note note-no">${DEPT[it.data.denied.team]} denied: ${esc(it.data.denied.why)}</p>` : ""}
       ${st === "accepted" ? `<p class="note note-ok">${icon("check")}Accepted · <a href="${link("calendar", { week: E.weekIndex(it.data.date, NOW) })}">Book trucks</a></p>` : ""}
@@ -317,8 +331,10 @@ function ordersView(store, state) {
     document.querySelectorAll("#o-filter button").forEach((b) => b.classList.toggle("on", b.dataset.filter === filter));
     const all = orders(items).reverse();
     const list = filter === "mine" ? all.filter(needsMe) : all;
-    // Keep the order you just answered on screen (so you see the result and the next step), even if it left "Waiting on me".
-    if (!byId(items, selected)) selected = list[0]?.id ?? null;
+    // New department: start from the top of its own list. Otherwise keep the order you picked or just answered.
+    if (deptSeen !== state.dept) { deptSeen = state.dept; pinned = selected = null; history.replaceState(null, "", location.pathname + location.search); }
+    const inList = list.some((x) => String(x.id) === String(selected));
+    if (!inList && !(pinned && String(pinned) === String(selected) && byId(items, selected))) selected = list[0]?.id ?? null;
     $("#o-list").innerHTML = list.length ? list.map((it) => `<button type="button" class="row${String(it.id) === String(selected) ? " row-on" : ""}" data-pick="${esc(it.id)}">
         <span class="row-top"><strong>${E.poNumber(items, it)}</strong> ${esc(custName(it.data.customer))}${dots(it)}</span>
         <span class="row-sub">${whatOf(items, it)} · ${esc(fmtShort(it.data.date))}${stageChip(it)}</span>
@@ -402,13 +418,15 @@ function calendarView(store, state) {
       const row = rows.find((r) => r.lane.key === key);
       const c = row?.cells.find((x) => x.day === day);
       if (c) {
-        const canAsk = c.fixable > 0 && E.daysBetween(NOW, day) >= RULES.carrierFlexNoticeDays;
+        const said = carrierSaid(items, row.lane, day);
+        const canAsk = c.fixable > 0 && E.daysBetween(NOW, day) >= RULES.carrierFlexNoticeDays && said.canAsk;
         return `<button type="button" class="linkish back" id="side-back">${icon("left")}To book</button>
           <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.kind === "order" ? `${custName(row.lane.destination)} · ${row.lane.destination}` : row.lane.destination)}${c.toBook ? ` · book by ${esc(fmtShort(E.addDays(day, -RULES.noticeDays)))}` : ""}</p>
           <ul class="moves">${c.moves.map((m) => `<li><span>${m.it.type === "order" ? `${E.poNumber(items, m.it)} · ${esc(custName(m.it.data.customer))}` : "Transfer"}</span>
             <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}${m.booked ? ` ${icon("check")}` : ""}</span></li>`).join("") || `<li class="empty">Nothing moving.</li>`}</ul>
           ${isLog && c.toBook ? `<button type="button" class="cta" data-book="1" data-cellkey="${esc(pick)}">Book ${plural(c.toBook, "truck")}</button>` : ""}
           ${isLog && canAsk ? `<button type="button" class="util wide" data-ask="${c.fixable}" data-cellkey="${esc(pick)}">Ask carrier for +${c.fixable}</button>` : ""}
+          ${said.text ? `<p class="said">${esc(said.text)}</p>` : ""}
           ${!isLog && c.toBook ? `<p class="small">Logistics books this.</p>` : ""}`;
       }
     }

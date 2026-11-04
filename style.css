@@ -258,3 +258,4 @@ input:hover, select:hover { border-color: var(--muted); }
 .from-bar { height: 14px; border-radius: 4px; background: var(--cream); overflow: hidden; }
 .from-bar i { display: block; height: 100%; background: var(--teal); }
 .from-n { text-align: right; font: 400 20px var(--serif); }
+.said { font-size: 14px; font-weight: 600; color: var(--teal); }
