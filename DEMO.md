@@ -1,4 +1,31 @@
-# Demo script (about 4 minutes, one presenter)
+# Short demo (2–2½ minutes, one presenter)
+
+**Before you start:** **Reset demo** (top right, PIN on live). Have two tabs open: **Customer HQ** and **Ball HQ → Logistics → Lanes**.
+
+**Open with (10 sec):** "Spot isn't a carrier problem, it's a timing problem. Ball sends trucks in bursts. Our app makes every truck fit what carriers committed to."
+
+**1. Spread it, don't spot it (45 sec) · Pillar 1**
+- **Planning → Short-term →** click **Send to Logistics** (Findlay prebuild, 12 trucks, Nov 9).
+- **Logistics → Transfers.** Point: **one batch = 9 spot, $4,635. Paced = all 12 on contract.** Click **Schedule**.
+- *Say:* "Same trucks, spread 3 a day, the carriers' daily commitment. Transfers are 64% of Ball's spot."
+- **Lanes →** click **Contact**, then **Said yes**. *Say:* "Every truck shows if the carrier's been contacted and if they've said yes."
+
+**2. Four teams, one screen (60 sec) · Pillars 2 + 3**
+- **Customer HQ → Order:** **1** million cans (5 truckloads), **Nov 19**, **Send order**.
+- **Ball HQ → Sales → Orders.** Point at **"If all four accept: 3 contract · 2 counteroffer."** Click **Accept**. Then **Inventory → Accept**, **Planning → Accept**.
+- *Say:* "Each team sees its check, and what its yes does for the others."
+- **Logistics → Orders:** "No carrier has room for 2." Click **Counteroffer: split 3 Nov 19 + 2 Nov 20**.
+- **Customer HQ → My POs:** **Take the split** (or keep Nov 19 and pay $1,204). *Say:* "Spot is the last resort, and if the customer wants it, they pay for it."
+
+**3. Marcelo's dashboard (30 sec)**
+- **Ball HQ → Executive.** Point at: **cost to serve $779 a load vs $1,063 the old way**, **pilot transfer spot 83% → 0%, saved $5,150**, and the **calendar** at the bottom: Findlay 3 a day, Coca-Cola 3 + 2.
+- *Close:* "Three shared numbers every team is scored on, so no one wins by pushing cost onto someone else."
+
+**Skip if short on time:** the Contact / Said yes clicks (just point at the outlined squares). **Add if you have time:** the early warning (full script below, part 2).
+
+---
+
+# Full demo script (about 4 minutes, one presenter)
 
 **Link:** https://jmheaton6.github.io/truck-price-check/ (on Thu Nov 5 the app's date is already right).
 **Rehearsal or no Wi-Fi:** http://localhost:8765/?local&today=2026-11-05 (or add `?local&today=2026-11-05` to the live link).
