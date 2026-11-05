@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 12:22:25 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -31,7 +31,7 @@ Run: 11/4/2026, 12:22:25 PM · http://localhost:8765/ · backup mode, today = Th
 | Ivy (Inventory) | Check how many labeled cans each customer has left. | yes | 2 | 0 |
 | Pia (Planning) | Check line time and the yearly baseline. | yes | 3 | 0 |
 | Sam (Sales) | Try to book trucks even though I'm in Sales. | yes | 1 | 0 |
-| Erin (Executive) | See how each department is doing and what we saved vs. the spot we're still paying for. | yes | 1 | 0 |
+| Erin (Executive) | Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved. | yes | 1 | 0 |
 
 ## Pat (customer, Coca-Cola buyer)
 *Our Nov 29 week has a promo: tell Ball it'll be 1.4 million cans.*
@@ -315,20 +315,23 @@ Run: 11/4/2026, 12:22:25 PM · http://localhost:8765/ · backup mode, today = Th
 - Opened the Sales hub
 
 ## Erin (Executive)
-*See how each department is doing and what we saved vs. the spot we're still paying for.*
+*Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved.*
 
 **What I did:**
 - Opened the Executive hub
-- Saw "Saved"
-- Saw "Spot Ball paid"
+- Saw "On-time delivery"
+- Saw "Change requests resolved"
+- Saw "Cost to serve"
 - Saw "Sales"
 - Saw "Inventory"
 - Saw "Planning"
 - Saw "Logistics"
-- Saved shows $5,949
+- Saw "Early warning"
+- Saw "Monticello pilot"
+- Pilot saved $5,949
 
 **Screens:**
-- executive: 79 words, longest line 10 words, main button none · `20-exec-executive.png`
+- executive: 120 words, longest line 8 words, main button none · `20-exec-executive.png`
 
 ## Final data
 | # | Type | Status | What | Date | Booked days |

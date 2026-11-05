@@ -34,9 +34,12 @@ To move around: **Customer HQ / Ball HQ** switch (top right), then the team name
     *Say:* "Spot is the last resort, and if the customer wants it, they pay for it."
 14. *(Optional)* **Ball HQ → Logistics → Lanes:** the calendar shows Findlay on Nov 9–12 and Coca-Cola on Nov 19 and 20.
 
-## 4. The payoff (≈20 sec)
-15. **Ball HQ → Executive.** **Saved $5,150**, old way **59% spot** vs now **0%**, goal 8%.
-    *Say:* "Same freight. The old way's weekly batches put 59% on spot. With the system, none."
+## 4. The payoff: Marcelo's dashboard (≈30 sec)
+15. **Ball HQ → Executive.**
+    - **Top row, three numbers every team shares:** on-time delivery **100%** (today 86%), change requests resolved **100%**, cost to serve **$779 a load** (old way $1,063).
+    - **Each team's own number + guardrail:** Logistics 0% spot, but it's judged on on-time too; Inventory and Planning are judged on changes resolved, so saying "no" hurts them.
+    - **Watch list:** Coca-Cola's promo week is **Covered**; Monticello pilot transfer spot **83% → 0%**, under the 20% go/no-go line, **saved $5,150**.
+    *Say:* "Three shared numbers keep each other honest: cut cost by refusing changes and number two drops; say yes to everything and number three rises."
 
 ## If something goes wrong
 - Click **Reset demo** and start again from step 1.

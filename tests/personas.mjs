@@ -313,15 +313,15 @@ await task(async () => {
   if (await page.getByRole("button", { name: /^Book/ }).count()) issue("Sales can see Book buttons.");
 });
 
-persona("Erin (Executive)", "exec", "See how each department is doing and what we saved vs. the spot we're still paying for.");
+persona("Erin (Executive)", "exec", "Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved.");
 await task(async () => {
   await go("?role=exec" + Q);
   await iAm("Executive");
   await look("executive");
-  for (const t of ["Saved", "Spot Ball paid", "Sales", "Inventory", "Planning", "Logistics"]) await sees(t);
-  const saved = await page.locator(".big-save .big-n").textContent();
-  step(`Saved shows ${saved}`);
-  if (/\$0$/.test(saved.trim())) issue("Saved is $0 after a paced prebuild.");
+  for (const t of ["On-time delivery", "Change requests resolved", "Cost to serve", "Sales", "Inventory", "Planning", "Logistics", "Early warning", "Monticello pilot"]) await sees(t);
+  const saved = (await page.locator(".x-box").last().innerText()).match(/saved (\$[\d,]+)/)?.[1] || "$0";
+  step(`Pilot saved ${saved}`);
+  if (saved === "$0") issue("Pilot shows $0 saved after a paced prebuild.");
 });
 
 const finalData = await page.evaluate(() => JSON.parse(localStorage.getItem("bc_items_v4") || "[]"));

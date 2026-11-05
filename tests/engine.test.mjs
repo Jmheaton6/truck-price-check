@@ -239,3 +239,19 @@ test("one carrier takes the whole load when it can; otherwise it splits down the
   // Coca-Cola: every carrier has 1 a day, so 3 trucks split.
   assert.deepEqual(cars(allAccept([], po(COKE, 3, "2026-11-19"))), ["Dedicated 1", "C.H. Robinson 1", "Sage 1"]);
 });
+
+test("dashboard: shared numbers, guardrails and cost to serve", () => {
+  const p1 = allAccept([], po(COKE, 3, "2026-11-19"));
+  const kept = allAccept([p1], change(p1, 2, "waiting", { expedite: true }));   // customer kept their date: resolved, they pay
+  const nope = { ...change(p1, 4), status: "declined", data: { ...change(p1, 4).data, denied: { team: "sales", why: "Over forecast" } } };
+  const d = E.dashboard([p1, kept, nope], NOW);
+  assert.equal(d.onTime, 1);
+  assert.deepEqual([d.changesResolved, d.changesDecided], [1, 2]);
+  assert.equal(d.denials.length, 1);
+  const coke = d.cost.find((r) => r.key === COKE);
+  assert.equal(coke.loads, 5);
+  assert.equal(coke.freight, 5 * E.laneOf("order", COKE).contract_cost);
+  assert.equal(coke.spot, coke.fees);                  // whatever went spot, the customer paid back as a fee
+  assert.equal(Math.round(coke.perLoad), E.laneOf("order", COKE).contract_cost);
+  assert.equal(d.sales.changeCost, 0);
+});

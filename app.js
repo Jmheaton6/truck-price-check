@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=49";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=49";
+import * as E from "./engine.js?v=50";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=50";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -851,43 +851,56 @@ function lineView() {
 // ---------- Ball HQ · Executive ----------
 function execView(store, state) {
   const html = `<section class="exec">
-    <div id="x-top" class="x-top"></div>
-    <div id="x-from" class="x-from"></div>
+    <div id="x-top" class="x-top x-top3"></div>
     <div id="x-cards" class="x-cards"></div>
+    <div id="x-watch" class="x-watch"></div>
+    <div id="x-cost" class="x-cost"></div>
   </section>`;
 
   function live(items) {
-    const now = E.totals(items, NOW);
-    const old = E.oldWay(items, NOW); // the same freight run the old way: Thursday batches, shipped Fri–Sun
-    const s = E.scorecards(items, NOW);
-    const saved = Math.max(0, old.overspend - now.overspend);
-    const bar = (label, t, cls) => `<div class="bar-row"><span class="bar-label">${label}</span>
-      <span class="bar">${t.trucks ? `<i class="bar-con" style="flex:${t.contract}"></i><i class="bar-spot" style="flex:${t.spot}"></i>` : `<i class="bar-none"></i>`}</span>
-      <span class="bar-n ${cls}">${t.trucks ? `${pct(t.spotShare)} spot` : "–"}</span></div>`;
+    const d = E.dashboard(items, NOW);
+    const p = (v) => (v == null ? "–" : pct(v));
+    // Top row: three shared numbers every team is judged on.
     $("#x-top").innerHTML = `
-      <div class="big-card big-save"><p class="big-label">Saved</p><p class="big-n">${money(saved)}</p><p class="big-sub">${plural(Math.max(0, Math.round(old.spot - now.spot)), "fewer spot truck", "fewer spot trucks")}</p></div>
-      <div class="big-card"><p class="big-label">Spot Ball paid</p><p class="big-n">${money(now.overspend)}</p><p class="big-sub">${plural(now.spot, "spot truck")}${now.fees ? ` · ${money(now.fees)} billed as expedite fees` : ""}</p></div>
-      <div class="big-card wide"><p class="big-label">Spot share</p>${bar("Old way", old, "bad")}${bar("Now", now, now.spotShare <= RULES.spotGoal ? "good" : "bad")}
-        <p class="big-sub">Old way = weekly batches, shipped Fri–Sun · Goal ${pct(RULES.spotGoal)}</p></div>`;
-    const by = E.savingsBy(items, NOW);
-    const parts = [["Prebuilds paced", by.transfers], ["Orders on the routing guide", by.orders]].filter(([, v]) => v > 0);
-    const top = Math.max(1, ...parts.map(([, v]) => v));
-    $("#x-from").innerHTML = saved ? `<p class="big-label">Where it came from</p>${parts.map(([n, v]) => `<div class="from-row"><span>${n}</span>
-        <span class="from-bar"><i style="width:${(v / top) * 100}%"></i></span><span class="from-n">${money(v)}</span></div>`).join("")}` : "";
-    // One card per hub: its number, and what's waiting on it. Click to open the hub.
-    const card = (name, value, sub, good, backlog = []) => { const hub = Object.keys(HUBS).find((k) => HUBS[k].name === name);
+      <div class="big-card"><p class="big-label">On-time delivery</p><p class="big-n">${p(d.onTime)}</p>
+        <p class="big-sub">Today ${pct(RULES.onTimeToday)}${d.firstDate == null ? "" : ` · ${pct(d.firstDate)} on first date`}</p></div>
+      <div class="big-card"><p class="big-label">Change requests resolved</p><p class="big-n">${p(d.changes)}</p>
+        <p class="big-sub">${d.changesDecided ? `${d.changesResolved} of ${d.changesDecided} · ` : ""}New with the pilot</p></div>
+      <div class="big-card"><p class="big-label">Cost to serve</p><p class="big-n">${d.costPerLoad == null ? "–" : money(d.costPerLoad)}</p>
+        <p class="big-sub">per load${d.oldCostPerLoad == null ? "" : ` · old way ${money(d.oldCostPerLoad)}`}</p></div>`;
+    // Middle row: each team's own number, plus the guardrail that stops it winning by hurting the others.
+    const card = (name, value, sub, guard, good, backlog = []) => { const hub = Object.keys(HUBS).find((k) => HUBS[k].name === name);
       const due = backlog.filter(([n]) => n).map(([n, what]) => `${n} ${what}`).join(" · ");
-      return `<div class="x-card ${good == null ? "" : good ? "x-good" : "x-bad"}"><a class="x-name" href="${hubLink(hub, "orders")}">${name} ${icon("right")}</a><p class="x-n">${value}</p><p class="x-sub">${sub}</p>${due ? `<p class="x-wait">${due}</p>` : ""}</div>`; };
-    const m = s.sales.answerMin;
+      return `<div class="x-card ${good == null ? "" : good ? "x-good" : "x-bad"}"><a class="x-name" href="${hubLink(hub, "orders")}">${name} ${icon("right")}</a>
+        <p class="x-n">${value}</p><p class="x-sub">${sub}</p><p class="x-guard">${guard}</p>${due ? `<p class="x-wait">${due}</p>` : ""}</div>`; };
     const waiting = (t) => orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[t]).length;
-    const toBook = E.toBookItems(items, NOW).length;
-    const toSchedule = items.filter((x) => x.type === "transfer" && x.status === "waiting").length;
+    const resolvedGuard = `Changes resolved ${p(d.changes)}`;
     $("#x-cards").innerHTML =
-      card("Sales", m == null ? "–" : m < 60 ? `${Math.max(1, Math.round(m))} min` : `${(m / 60).toFixed(1)} hr`, "to answer · goal 4 hr", m == null ? null : m <= 240, [[waiting("sales"), "waiting"]]) +
-      card("Inventory", `${s.inventory.stranded}`, "truckloads stranded", s.inventory.stranded === 0, [[waiting("inventory"), "waiting"]]) +
-      card("Planning", pct(s.planning.share), "line time used", null, [[waiting("planning"), "waiting"]]) +
-      card("Logistics", s.logistics.trucks ? pct(s.logistics.spotShare) : "–", `spot · ${s.logistics.ahead == null ? "–" : pct(s.logistics.ahead)} booked ahead`, s.logistics.trucks ? s.logistics.spotShare <= RULES.spotGoal : null,
-        [[waiting("logistics"), "waiting"], [toBook, "to book"], [toSchedule, "to schedule"]]);
+      card("Sales", money(d.sales.profit), `profit · ${plural(d.sales.wins, "PO")}`, `Change-order cost ${money(d.sales.changeCost)}`, null, [[waiting("sales"), "waiting"]]) +
+      card("Inventory", `${d.inventory.inRange} of ${d.inventory.customers}`, "in stock range", resolvedGuard, d.inventory.inRange === d.inventory.customers, [[waiting("inventory"), "waiting"]]) +
+      card("Planning", d.planning.leadDays == null ? "–" : `${Math.round(d.planning.leadDays)} days`, "forecast warning", resolvedGuard, null, [[waiting("planning"), "waiting"]]) +
+      card("Logistics", d.logistics.trucks ? pct(d.logistics.spotShare) : "–", `spot${d.logistics.acceptance == null ? "" : ` · ${pct(d.logistics.acceptance)} carrier acceptance`}`, `On-time ${p(d.onTime)}`,
+        d.logistics.trucks ? d.logistics.spotShare <= RULES.spotGoal : null,
+        [[waiting("logistics"), "waiting"], [E.toBookItems(items, NOW).length, "to book"], [items.filter((x) => x.type === "transfer" && x.status === "waiting").length, "to schedule"]]);
+    // Bottom row: watch list.
+    const ewName = (l) => (l.kind === "order" ? custName(l.destination) : l.destination.split(",")[0]);
+    const zoneChip = { R: `<span class="z z-R">Red</span>`, Y: `<span class="z z-Y">Yellow</span>`, C: `<span class="z z-C">Covered</span>` };
+    const pl = d.pilot, scale = Math.max(0.4, pl.oldTransferSpot || 0);
+    const pbar = (label, v) => `<div class="pb-row"><span>${label}</span><span class="pb-track"><i style="width:${((v || 0) / scale) * 100}%"></i></span><b>${p(v)}</b></div>`;
+    $("#x-watch").innerHTML = `
+      <div class="x-box"><p class="big-label">Early warning</p>${d.earlyWarning.length ? `<ul class="watch">${d.earlyWarning.map((w) =>
+        `<li><span>${esc(ewName(w.lane))} · wk ${esc(fmtShort(w.week))}</span>${zoneChip[w.zone]}</li>`).join("")}</ul>` : `<p class="x-sub">All green.</p>`}</div>
+      <div class="x-box"><p class="big-label">Denials and overrides</p>${d.denials.length ? `<ul class="watch">${d.denials.map((x) =>
+        `<li><span>${esc(E.poNumber(items, x.it))} · ${esc(custName(x.it.data.customer))}</span><span class="muted">${esc(HUBS[x.team]?.name || x.team)}: ${esc(x.why)}</span></li>`).join("")}</ul>` : `<p class="x-sub">No denials.</p>`}
+        <p class="x-sub">0 VP overrides</p></div>
+      <div class="x-box"><p class="big-label">Monticello pilot · transfer spot</p>
+        <div class="pb">${pbar("Old way", pl.oldTransferSpot)}${pbar("Now", pl.transferSpot)}<i class="pb-line" style="left:calc(64px + (100% - 64px - 48px) * ${RULES.pilotGoNoGo / scale})"></i></div>
+        <p class="x-sub">Scale up below ${pct(RULES.pilotGoNoGo)} · saved ${money(pl.saved)}</p></div>`;
+    // Cost to serve, broken down.
+    const rowName = (k) => (k === "transfers" ? "Prebuilds" : custName(k));
+    $("#x-cost").innerHTML = d.cost.length ? `<p class="big-label">Cost to serve, by customer</p><table class="tbl x-tbl"><thead><tr><th></th><th>Loads</th><th>Freight</th><th>+ Spot</th><th>+ Holding</th><th>− Fees</th><th>Per load</th></tr></thead><tbody>
+      ${d.cost.map((r) => `<tr><th scope="row">${esc(rowName(r.key))}</th><td>${r.loads}</td><td>${money(r.freight)}</td><td>${money(r.spot)}</td><td>${money(r.holding)}</td><td>${money(r.fees)}</td><td><b>${money(r.perLoad)}</b></td></tr>`).join("")}</tbody></table>
+      <p class="x-sub">Claims and write-offs: measured in the pilot.</p>` : "";
   }
 
   return { html, live };

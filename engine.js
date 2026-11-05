@@ -5,7 +5,7 @@
 // (it needs 3+ days' notice), then backup 1, then backup 2. If none has room that day, a customer gets a
 // counteroffer date; if they keep their date, it goes spot and they pay the spot premium as an expedite fee.
 // Spot is the last resort.
-import { LANES, MONTHLY } from "./lanes.js?v=49";
+import { LANES, MONTHLY } from "./lanes.js?v=50";
 export { MONTHLY };
 
 export const RULES = {
@@ -14,6 +14,10 @@ export const RULES = {
   freezeDays: 3,         // production runs lock 3 days before they start
   makeLeadDays: 2,       // cans are made about 2 days before they ship
   cansPerTruck: 200000,  // about one full truckload of 12 oz cans
+  canValue: 28010,       // $ per truckload of cans (GW Kent full-truckload price; the deck's holding-cost input)
+  carryRate: 0.23,       // inventory carrying cost a year (midpoint of 18–28%)
+  onTimeToday: 0.86,     // sales-order on-time delivery today (case: 86–87%)
+  pilotGoNoGo: 0.20,     // Monticello pilot: scale up if transfer spot falls below 20%
   flexBand: 0.10,        // a customer's week can run up to 10% over its forecast
   weeks: 6,              // horizon
   weeksOf2026: 30.3,     // Jan 1 – Jul 31, 2026
@@ -527,10 +531,11 @@ export function oldWay(items, now) {
     }
   }
   const got = tender(lineUp(moves, () => 0), now);
-  const t = { trucks: 0, contract: 0, spot: 0, overspend: 0, byType: { order: 0, transfer: 0 } };
+  const t = { trucks: 0, contract: 0, spot: 0, overspend: 0, byType: { order: 0, transfer: 0 }, trucksBy: { order: 0, transfer: 0 }, spotBy: { order: 0, transfer: 0 }, freight: 0 };
   for (const m of moves) {
     const g = got.get(m);
     t.trucks += m.n; t.contract += g.contract; t.spot += g.short;
+    t.trucksBy[m.it.type] += m.n; t.spotBy[m.it.type] += g.short; t.freight += m.n * m.lane.contract_cost;
     const cost = overspend(m.lane, g.short);
     t.overspend += cost; t.byType[m.it.type] += cost;
   }
@@ -541,6 +546,65 @@ export function oldWay(items, now) {
 export function savingsBy(items, now) {
   const old = oldWay(items, now), cur = totals(items, now);
   return { orders: Math.max(0, old.byType.order - cur.byType.order), transfers: Math.max(0, old.byType.transfer - cur.byType.transfer), fees: cur.fees };
+}
+
+// ---------- Marcelo's dashboard: three shared numbers, each team's own number + guardrail, a watch list ----------
+// Counts accepted customer orders and scheduled prebuilds. Cost to serve per load = freight at contract rates
+// + spot premium (whoever paid it) + holding (prebuild loads waiting for their wave) − expedite fees recovered.
+export function dashboard(items, now) {
+  const alloc = allocate(items, now);
+  const holdPerDay = (RULES.canValue * RULES.carryRate) / 365;
+  const isChange = (x) => x.data.kind === "change";
+  const won = items.filter((x) => x.type === "order" && x.status === "confirmed" && x.data.trucks > 0);
+  // 1. On-time: every truck covered (contract, or spot) on the agreed date; and on the date the customer first asked.
+  const covered = won.filter((x) => alloc.get(x.id) && !alloc.get(x.id).counter);
+  const firstDate = covered.filter((x) => !x.data.asked || x.data.asked === x.data.date);
+  // 2. Change requests resolved: a yes, a counteroffer taken, or a paid expedite (all end confirmed); a deny or cancel doesn't.
+  const decided = items.filter((x) => x.type === "order" && isChange(x) && ["confirmed", "declined"].includes(x.status));
+  const resolved = decided.filter((x) => x.status === "confirmed");
+  // 3. Cost to serve, per customer and for transfers.
+  const rows = new Map();
+  for (const it of [...won, ...items.filter((x) => x.type === "transfer" && x.status === "booked")]) {
+    const a = alloc.get(it.id);
+    if (!a || a.trucks <= 0) continue;
+    const key = it.type === "order" ? it.data.customer : "transfers";
+    const r = rows.get(key) || { key, loads: 0, freight: 0, spot: 0, holding: 0, fees: 0 };
+    r.loads += a.trucks;
+    r.freight += a.trucks * a.lane.contract_cost;
+    r.spot += a.overspend + a.fee;
+    r.fees += a.fee;
+    if (it.type === "transfer") r.holding += a.days.reduce((h, d) => h + Math.max(0, daysBetween(it.data.ready, d.day)) * d.n * holdPerDay, 0);
+    rows.set(key, r);
+  }
+  const cost = [...rows.values()].map((r) => ({ ...r, total: r.freight + r.spot + r.holding - r.fees }));
+  cost.forEach((r) => { r.perLoad = r.total / r.loads; });
+  const all = cost.reduce((t, r) => ({ loads: t.loads + r.loads, total: t.total + r.total }), { loads: 0, total: 0 });
+  // Teams
+  const t = totals(items, now), old = oldWay(items, now);
+  const plan = planUse(items, now);
+  // Inventory's target range: labeled stock (plus cans stranded by a late cut) no more than next week's forecast.
+  const strandedBy = (c) => items.filter((x) => x.type === "order" && x.data.customer === c && x.status === "confirmed" && x.data.trucks < 0 && plan.get(x.id)?.frozen).reduce((s, x) => s - x.data.trucks, 0);
+  const inRange = Object.keys(SIM_CUSTOMERS).filter((c) => SIM_CUSTOMERS[c].stock + strandedBy(c) <= latestForecast(items, c, 1, now)).length;
+  const flagged = items.filter((x) => x.type === "forecast" && x.data.on && x.data.week).map((x) => daysBetween(x.data.on, x.data.week));
+  const changeCost = won.filter(isChange).reduce((s, x) => s + (alloc.get(x.id)?.overspend || 0), 0);
+  const tendered = t.trucks;
+  // Watch list
+  const ew = earlyWarning(items, now).flatMap((r) => r.weeks.filter((w) => w.zone !== "G").map((w) => ({ lane: r.lane, ...w })));
+  const denials = items.filter((x) => x.type === "order" && x.status === "declined" && x.data.denied).map((x) => ({ it: x, team: x.data.denied.team, why: x.data.denied.why }));
+  const tr = { trucks: 0, spot: 0 };
+  for (const it of items) if (it.type === "transfer" && it.status === "booked") { const a = alloc.get(it.id); if (a) { tr.trucks += a.trucks; tr.spot += a.spot; } }
+  return {
+    onTime: won.length ? covered.length / won.length : null, firstDate: won.length ? firstDate.length / won.length : null, orders: won.length,
+    changes: decided.length ? resolved.length / decided.length : null, changesDecided: decided.length, changesResolved: resolved.length,
+    costPerLoad: all.loads ? all.total / all.loads : null, cost, oldCostPerLoad: old.trucks ? (old.freight + old.overspend) / old.trucks : null,
+    sales: { wins: won.filter((x) => !isChange(x)).length, profit: won.reduce((s, x) => s + x.data.trucks, 0) * RULES.profitPerTruck, changeCost },
+    inventory: { inRange, customers: Object.keys(SIM_CUSTOMERS).length },
+    planning: { leadDays: flagged.length ? flagged.reduce((a, b) => a + b, 0) / flagged.length : null, flags: flagged.length },
+    logistics: { spotShare: t.spotShare, acceptance: tendered ? t.contract / tendered : null, trucks: tendered },
+    earlyWarning: ew, denials,
+    pilot: { transferSpot: tr.trucks ? tr.spot / tr.trucks : null, oldTransferSpot: old.trucksBy.transfer ? old.spotBy.transfer / old.trucksBy.transfer : null,
+      saved: Math.max(0, old.overspend - t.overspend), trucks: tr.trucks },
+  };
 }
 
 export function scorecards(items, now) {

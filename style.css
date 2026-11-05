@@ -435,3 +435,23 @@ a.x-name .ic { margin: 0 0 0 4px; width: .9em; }
 /* Header: Reset demo (presenter only; the live site asks for the PIN) */
 .reset-demo { border: 1px solid rgba(255,255,255,.35); background: transparent; color: rgba(255,255,255,.85); font: 600 13px var(--sans); padding: 6px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .reset-demo:hover { color: var(--white); border-color: var(--white); }
+
+/* Executive (Marcelo's dashboard): 3 shared numbers, team cards with guardrails, watch list, cost to serve */
+.x-top3 { grid-template-columns: repeat(3, 1fr); }
+.x-guard { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--ink); }
+.x-watch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+.x-box { background: var(--white); border-radius: 16px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+.watch { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.watch li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.watch li .z { margin: 0; }
+.watch .muted { font-weight: 400; color: var(--muted); text-align: right; }
+.pb { position: relative; margin: 4px 0; }
+.pb-row { display: grid; grid-template-columns: 64px 1fr 48px; align-items: center; gap: 0; margin: 8px 0; font-size: 14px; font-weight: 600; }
+.pb-row b { text-align: right; }
+.pb-track { height: 14px; border-radius: 4px; background: var(--cream); overflow: hidden; margin-right: 8px; }
+.pb-track i { display: block; height: 100%; background: var(--spot); }
+.pb-line { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
+.x-cost { background: var(--white); border-radius: 16px; padding: 18px 22px; margin-top: 16px; }
+.x-cost:empty { display: none; }
+.x-tbl { margin: 6px 0 8px; }
+.x-tbl td { font-size: 18px; }
