@@ -290,15 +290,12 @@ test("carrier states: contact carrier → waiting on carrier → confirmed, per 
   assert.deepEqual(got([later, asked], asked), [3, 0, 0]);
 });
 
-test("reset demo seeds Coca-Cola's PO, sent and waiting on all four teams; the demo's change still needs a counteroffer", () => {
-  const [seed] = E.demoSeed(NOW).map((r) => ({ ...r, id: "seed", created_at: AT }));
-  assert.deepEqual([seed.data.date, E.stageOf(seed), E.poNumber([seed], seed)], ["2026-11-19", "checking", "PO-1001"]);
-  const c = E.checks([seed], seed, NOW);
-  assert.ok(E.TEAMS.every((t) => c[t].ok));                      // every check passes: four Accepts
-  const p = allAccept([], seed);
-  assert.equal(E.stageOf(p), "accepted");
+test("reset demo seeds one booked Coca-Cola PO: 3 truckloads, two Thursdays out, all on contract", () => {
+  const [p] = E.demoSeed(NOW, AT).map((r) => ({ ...r, id: "seed", created_at: AT }));
+  assert.deepEqual([p.data.date, E.stageOf(p), E.poNumber([p], p)], ["2026-11-19", "booked", "PO-1001"]);
   assert.deepEqual(got([p], p), [3, 0, 0]);
+  assert.equal(E.reliability([p], COKE).late, 2);   // only the simulated history; the seed isn't late
   let ch = change(p, 2);
   for (const team of ["sales", "inventory", "planning"]) { const u = E.decide([p, ch], ch, team, true, AT, NOW); ch = { ...ch, ...u }; }
-  assert.equal(E.checks([p, ch], ch, NOW).logistics.counter, 2);
+  assert.deepEqual(E.checks([p, ch], ch, NOW).logistics.counter, 2);  // the demo's late change still needs a counteroffer
 });
