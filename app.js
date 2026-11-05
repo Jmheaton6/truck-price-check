@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=55";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=55";
+import * as E from "./engine.js?v=56";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=56";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -847,15 +847,28 @@ function shorttermView(store, state) {
 
 // ---------- Ball HQ · Planning · Long-term: the plant's real monthly loads and next year's baseline ----------
 function longtermView() {
-  const html = `<section class="panel"><h1>Monticello, 12 months</h1>
-    <span class="legend line-legend"><i class="lb lb-2025"></i>2025 <i class="lb lb-used"></i>2026 <i class="lb lb-fc"></i>2026 plan (2025 + 2%)</span>
-    <div id="lt" class="lt"></div><p class="small">Loads a month, all lanes (Ball's workbook).</p></section>`;
+  const html = `<section class="panel"><h1>Trucks leaving Monticello, by month</h1>
+    <p class="lt-lead">Every truckload a month, all lanes (Ball's workbook, no shuttles). Planning uses it to set next year's baseline and to tell carriers months ahead what's coming.</p>
+    <div id="lt-facts" class="lt-facts"></div>
+    <span class="legend line-legend"><i class="lb lb-2025"></i>2025 actual <i class="lb lb-used"></i>2026 actual <i class="lb lb-fc"></i>2026 plan = same month in 2025 + 2%</span>
+    <div id="lt" class="lt"></div><p class="small">Number under each month = 2026 trucks (actual through July, plan after).</p></section>`;
   function live() {
     const lt = E.longTerm();
     const top = Math.max(...lt.flatMap((m) => [m.y2025 || 0, m.forecast2026 || 0]));
+    const sum = (y, ms = lt) => ms.reduce((t, m) => t + (E.MONTHLY[`${m.month}-${y}`] || 0), 0);
+    const known = lt.filter((m) => m.actual);
+    const ytd25 = sum(2025, known), ytd26 = sum(2026, known);
+    // Busiest stretch: the 4 months in a row with the most trucks in 2025.
+    const peak = lt.slice(0, 9).map((m, i) => ({ i, n: sum(2025, lt.slice(i, i + 4)) })).sort((x, y) => y.n - x.n)[0].i;
+    const chg = Math.round((ytd26 / ytd25 - 1) * 100);
+    $("#lt-facts").innerHTML = `
+      <div class="lt-fact"><b>About the same every year</b><span>${sum(2024).toLocaleString("en-US")} trucks in 2024 · ${sum(2025).toLocaleString("en-US")} in 2025</span></div>
+      <div class="lt-fact"><b>Busiest: ${lt[peak].month}–${lt[peak + 3].month}</b><span>when the summer prebuild ships</span></div>
+      <div class="lt-fact"><b>2026 so far: ${chg > 0 ? "+" : "−"}${Math.abs(chg)}%</b><span>${ytd26.toLocaleString("en-US")} trucks ${known[0].month}–${known.at(-1).month} vs ${ytd25.toLocaleString("en-US")} in 2025</span></div>
+      <p class="lt-so">Spot isn't caused by more trucks. It's caused by when they ship.</p>`;
     $("#lt").innerHTML = lt.map((m) => `<div class="lt-m"><div class="lt-bars">
         <i class="lb-2025" style="height:${((m.y2025 || 0) / top) * 100}%" title="2025: ${m.y2025}"></i>
-        <i class="${m.actual ? "lb-used" : "lb-fc"}" style="height:${(m.forecast2026 / top) * 100}%" title="2026: ${m.forecast2026}"></i></div>
+        <i class="${m.actual ? "lb-used" : "lb-fc"}" style="height:${(m.forecast2026 / top) * 100}%" title="2026${m.actual ? "" : " plan"}: ${m.forecast2026}"></i></div>
         <span>${m.month}</span><b>${m.forecast2026.toLocaleString("en-US")}</b></div>`).join("");
   }
   return { html, live };
