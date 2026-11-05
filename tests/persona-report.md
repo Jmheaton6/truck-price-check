@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 11:08:30 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 11:17:40 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -31,7 +31,7 @@ Run: 11/4/2026, 11:08:30 PM · http://localhost:8765/ · backup mode, today = Th
 | Ivy (Inventory) | Check how many labeled cans each customer has left. | yes | 2 | 0 |
 | Pia (Planning) | Check line time and the yearly baseline. | yes | 3 | 0 |
 | Sam (Sales) | Try to contact carriers even though I'm in Sales. | yes | 1 | 0 |
-| Erin (Executive) | Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved. | yes | 1 | 1 |
+| Erin (Executive) | Check the three shared numbers, each team and its guardrail, what we saved, and what is going out. | yes | 1 | 1 |
 
 ## Pat (customer, Coca-Cola buyer)
 *Our Nov 29 week has a promo: tell Ball it'll be 1.4 million cans.*
@@ -317,10 +317,10 @@ Run: 11/4/2026, 11:08:30 PM · http://localhost:8765/ · backup mode, today = Th
 - Opened the Sales hub
 
 ## Erin (Executive)
-*Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved.*
+*Check the three shared numbers, each team and its guardrail, what we saved, and what is going out.*
 
 **Friction:**
-- "executive": 174 words on screen (aim ≤ 120).
+- "executive": 146 words on screen (aim ≤ 120).
 
 **What I did:**
 - Opened the Executive hub
@@ -331,12 +331,11 @@ Run: 11/4/2026, 11:08:30 PM · http://localhost:8765/ · backup mode, today = Th
 - Saw "Inventory"
 - Saw "Planning"
 - Saw "Logistics"
-- Saw "Early warning"
-- Saw "Monticello pilot"
-- Pilot saved $5,949
+- Saw "What's going out"
+- Saved $5,949
 
 **Screens:**
-- executive: 174 words, longest line 9 words, main button none · `20-exec-executive.png`
+- executive: 146 words, longest line 9 words, main button none · `20-exec-executive.png`
 
 ## Final data
 | # | Type | Status | What | Date | Booked days |

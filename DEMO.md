@@ -1,54 +1,51 @@
-# Short demo (2–2½ minutes, one presenter)
+# Demo (2½ minutes, one presenter)
 
-**Before you start:** open the live link, click **Reset demo** (top right) and type the PIN. Each step: **Do** = what you click. **They see** = what's on the screen for the judges. **Say** = your line.
+**0. Before you start:** click **Reset demo** (top right) and type the PIN. Each step: **Do** = what you click. **They see** = what the judges see on screen. **Say** = your line.
 
-**0. Open (10 sec)**
-- **Say:** "Spot isn't a carrier problem, it's a timing problem. Ball sends trucks in bursts. Our app makes every truck fit what the carriers committed to."
+**Open (10 sec).** *Say:* "Spot isn't a carrier problem, it's a timing problem. Ball sends trucks in bursts. Our app gets every team working off one truck plan."
 
-**1. Planning sends a prebuild (10 sec)**
-- **Do:** Ball HQ → **Planning** → **Short-term** tab → click **Send to Logistics** (the form is already filled in: Findlay, OH · 12 truckloads · Nov 9).
-- **They see:** a 6-week table of customer forecasts in trucks, and the prebuild going to Logistics.
-- **Say:** "Planning builds 12 truckloads ahead of the summer peak. Today those ship the day they're done."
+## Part 1: Weeks ahead (about 50 sec)
+1. **Do:** Customer HQ (Coca-Cola). Under **My forecast**, type **1.4** in **Nov 29** → **Share forecast**.
+   **They see:** the customer's own portal; 1.4 million cans turns into **7 truckloads**.
+   **Say:** "Coca-Cola has a promo. They tell us weeks ahead, in cans; the app turns it into trucks."
+2. **Do:** Ball HQ → **Planning** → **Short-term**. Point at Coca-Cola, Nov 29. Then **Send to Logistics** (the prebuild form is already filled in: Findlay, 12, Nov 9).
+   **They see:** a 6-week table of every customer's trucks vs. carrier room. Coca-Cola's Nov 29 week is flagged **7, +2** over the carriers' 5.
+   **Say:** "That's the early warning. Planning also sends Logistics a 12-truck prebuild for the summer peak."
+3. **Do:** **Logistics** → **Lanes**. Under **Early warning**, click **Line up 2 more**.
+   **They see:** "Forecast 7 trucks · carriers committed to 5". A dashed "Extra trucks lined up" bar appears under the week of Nov 29.
+   **Say:** "Logistics asks for 2 more trucks a month ahead, not 2 days ahead."
+4. **Do:** **Transfers**. Point at both options → **Schedule**.
+   **They see:** **One batch: 3 contract, 9 spot, $4,635** next to **Paced waves: 12 contract, Nov 9–12** (Best).
+   **Say:** "Same 12 trucks. Carriers committed to 3 a day. Spread out, all 12 go on contract. Transfers are 64% of Ball's spot."
 
-**2. Logistics spreads it (25 sec)**
-- **Do:** **Logistics** → **Transfers** tab. Point at the two options, then click **Schedule**.
-- **They see:** **One batch: 3 contract, 9 spot, $4,635** next to **Paced waves: 12 contract, Nov 9–12**, marked Best.
-- **Say:** "Same 12 trucks. The carriers committed to 3 a day on this lane. In one batch, 9 go spot. Spread over 4 days, all 12 go on contract. Transfers are 64% of Ball's spot."
+## Part 2: An order (about 40 sec)
+5. **Do:** Customer HQ → **Order**: **0.6** million cans, deliver **11/19/2026** → **Send order**.
+   **They see:** 0.6 million = **3 truckloads**; Coca-Cola is **93% reliable · Priority**.
+   **Say:** "Reliable customers earn priority."
+6. **Do:** Ball HQ → **Sales** → **Orders** → **Accept**. Then **Inventory → Accept**, **Planning → Accept**, **Logistics → Accept**.
+   **They see:** one card per team with its check (Sales "Forecast 5: 3 fits", Inventory "1 from stock", Planning "2 to make: fits", Logistics "Dedicated 1 · C.H. Robinson 1 · Sage 1"). Above them: **"If all four accept: 3 contract · $3,100 / truck."**
+   **Say:** "Four teams, one screen. Each sees its own check and what its yes does for the others."
+7. **Do:** Logistics → **Lanes** → **Contact all**, then **All said yes**.
+   **They see:** the calendar: Findlay 3 a day Nov 9–12, Coca-Cola 3 on Nov 19. Squares go outlined → half-filled → solid.
+   **Say:** "Every truck shows whether the carrier has been contacted and whether they've said yes, at least 48 hours ahead."
 
-**3. Contact the carriers, 48 hours ahead (20 sec)**
-- **Do:** **Lanes** tab. Click **Contact** next to Findlay, then **Said yes**.
-- **They see:** the calendar with Findlay, 3 a day Nov 9–12. The squares go from outlined (contact carrier) to half-filled (waiting on carrier) to solid (confirmed). The list says "by Nov 7", 48 hours before the first truck.
-- **Say:** "Every truck shows whether the carrier has been contacted and whether they've said yes. Carriers hear from us at least 48 hours ahead."
+## Part 3: A late change (about 40 sec)
+8. **Do:** Customer HQ → **My POs** → **Change**: **1** million (+2 trucks) → **Send change**.
+9. **Do:** Ball HQ → **Sales** → **Accept**, **Inventory → Accept**, **Planning → Accept**.
+   **They see:** Sales: profit drops to **$2,498 / truck**. The strip says **"0 contract · 2 counteroffer."**
+10. **Do:** **Logistics** → **Orders** → **Counteroffer Nov 20**.
+    **They see:** "No carrier has room for 2. If you accept: customer gets a counteroffer, not spot."
+    **Say:** "Nov 19 is full. Instead of 2 spot trucks, we offer the next day."
+11. **Do:** Customer HQ → **My POs** → **Take Nov 20**.
+    **They see:** **Take Nov 20** next to **Keep Nov 19 · +$1,204**.
+    **Say:** "Spot is the last resort, and if the customer wants it, they pay for it."
 
-**4. A customer orders (15 sec)**
-- **Do:** **Customer HQ** (top right) → **Order** → Million cans **1** → Deliver on **11/19/2026** → **Send order**.
-- **They see:** Coca-Cola's portal. 1 million cans becomes **5 truckloads**, and Coca-Cola shows as **Priority** (94% reliable).
-- **Say:** "Customers order in cans. The app turns cans into trucks."
+## Part 4: Payoff (about 20 sec)
+12. **Do:** Ball HQ → **Executive**. Point at the top row, then scroll to the calendar.
+    **They see:** **on-time 100%** (today 86%), **change requests resolved 100%**, **cost to serve $779 a load vs. $1,063 the old way, saved $5,150**. Logistics: **0% spot**. The calendar shows everything going out: Findlay 3 a day, Coca-Cola Nov 19 and 20, and the extra trucks for Nov 29.
+    **Say:** "Every team is scored on the same three numbers, so no one wins by pushing cost onto someone else."
 
-**5. Four teams check it on one screen (30 sec)**
-- **Do:** **Ball HQ** → **Sales** → **Orders**. Point at the strip, then click **Accept**. Then **Inventory → Accept** and **Planning → Accept**.
-- **They see:** one card per team, each with its check: Sales "Forecast 5: 5 fits", Inventory "1 from stock", Planning "4 to make: fits", Logistics "No carrier has room for 2". Above them: **"If all four accept: 3 contract · 2 counteroffer · $2,859 / truck."** Sales' card adds **"If you accept: $14,295 profit."**
-- **Say:** "Each team sees its own check, and what its yes means for everyone else. Logistics already sees a problem: only 3 trucks fit that day."
-
-**6. Logistics counteroffers instead of using spot (15 sec)**
-- **Do:** **Logistics** → **Orders** → click **Counteroffer: split 3 Nov 19 + 2 Nov 20**.
-- **They see:** the Logistics card: "No carrier has room for 2. If you accept: customer gets a counteroffer, not spot."
-- **Say:** "Instead of 2 spot trucks, we offer to ship the last 2 the next day."
-
-**7. The customer decides (15 sec)**
-- **Do:** **Customer HQ** → **My POs** → click **Take the split**.
-- **They see:** "Ball can ship 3 Thu, Nov 19 + 2 Fri, Nov 20, all on contract," next to **Keep Nov 19 · +$1,204**.
-- **Say:** "Spot is the last resort. If the customer wants it anyway, they pay the premium."
-
-**8. Marcelo's dashboard (30 sec)**
-- **Do:** **Ball HQ** → **Executive**. Point at the top row, then the pilot box, then scroll to the calendar.
-- **They see:**
-  - Top row: **on-time 100%** (today 86%) and **cost to serve $779 a load** (old way $1,063).
-  - Pilot box: **transfer spot 83% → 0%**, under the 20% go/no-go line, **saved $5,150**.
-  - Calendar at the bottom: Findlay 3 a day Nov 9–12, and Coca-Cola 3 on Nov 19 and 2 on Nov 20.
-- **Say:** "Every team is scored on the same three numbers, so no one wins by pushing cost onto someone else. On the pilot lanes, spot went from 83% to zero."
-
-**Running long?** Skip step 3's clicks (point at the outlined squares) and step 1's line.
+**Running long?** Skip step 7 (point at the outlined squares) and step 5's line.
 
 ---
 
@@ -89,9 +86,8 @@ To move around: **Customer HQ / Ball HQ** switch (top right), then the team name
 
 ## 4. The payoff: Marcelo's dashboard (≈30 sec)
 12. **Ball HQ → Executive.**
-    - **Top row, three numbers every team shares:** on-time delivery **100%** (today 86%), change requests resolved, cost to serve **$779 a load** (old way $1,063).
+    - **Top row, three numbers every team shares:** on-time delivery **100%** (today 86%), change requests resolved, cost to serve **$779 a load** (old way $1,063), **saved $5,150**.
     - **Each team's own number + guardrail:** Logistics 0% spot, judged on on-time too.
-    - **Monticello pilot transfer spot: 83% → 0%**, under the 20% go/no-go line, **saved $5,150**.
     - **What's going out:** the calendar at the bottom. Findlay 3 a day Nov 9–12, Coca-Cola 3 + 2, the extra trucks lined up for Nov 29.
     *Say:* "Three shared numbers keep each other honest: cut cost by refusing changes and number two drops; say yes to everything and number three rises."
 

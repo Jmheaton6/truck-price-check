@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=53";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=53";
+import * as E from "./engine.js?v=54";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=54";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -915,7 +915,6 @@ function execView(store, state) {
   const html = `<section class="exec">
     <div id="x-top" class="x-top x-top3"></div>
     <div id="x-cards" class="x-cards"></div>
-    <div id="x-watch" class="x-watch"></div>
     <div id="x-cost" class="x-cost"></div>
     <div class="x-cal"><div class="x-cal-head"><p class="big-label">What's going out · <span id="x-cal-range"></span></p>
       <a class="linkish" href="${hubLink("logistics", "calendar")}">Open in Logistics ${icon("right")}</a></div>${LEGEND}<div id="x-cal" class="readonly"></div></div>
@@ -931,7 +930,7 @@ function execView(store, state) {
       <div class="big-card"><p class="big-label">Change requests resolved</p><p class="big-n">${p(d.changes)}</p>
         <p class="big-sub">${d.changesDecided ? `${d.changesResolved} of ${d.changesDecided} · ` : ""}New with the pilot</p></div>
       <div class="big-card"><p class="big-label">Cost to serve</p><p class="big-n">${d.costPerLoad == null ? "–" : money(d.costPerLoad)}</p>
-        <p class="big-sub">per load${d.oldCostPerLoad == null ? "" : ` · old way ${money(d.oldCostPerLoad)}`}</p></div>`;
+        <p class="big-sub">per load${d.oldCostPerLoad == null ? "" : ` · old way ${money(d.oldCostPerLoad)}`}${d.pilot.saved ? ` · <b>saved ${money(d.pilot.saved)}</b>` : ""}</p></div>`;
     // Middle row: each team's own number, plus the guardrail that stops it winning by hurting the others.
     const card = (name, value, sub, guard, good, backlog = []) => { const hub = Object.keys(HUBS).find((k) => HUBS[k].name === name);
       const due = backlog.filter(([n]) => n).map(([n, what]) => `${n} ${what}`).join(" · ");
@@ -946,20 +945,6 @@ function execView(store, state) {
       card("Logistics", d.logistics.trucks ? pct(d.logistics.spotShare) : "–", `spot${d.logistics.acceptance == null ? "" : ` · ${pct(d.logistics.acceptance)} carrier acceptance`}`, `On-time ${p(d.onTime)}`,
         d.logistics.trucks ? d.logistics.spotShare <= RULES.spotGoal : null,
         [[waiting("logistics"), "waiting"], [E.toBookItems(items, NOW).length, "to contact"], [E.waitingItems(items, NOW).length, "waiting on carrier"], [items.filter((x) => x.type === "transfer" && x.status === "waiting").length, "to schedule"]]);
-    // Bottom row: watch list.
-    const ewName = (l) => (l.kind === "order" ? custName(l.destination) : l.destination.split(",")[0]);
-    const zoneChip = { R: `<span class="z z-R">Red</span>`, Y: `<span class="z z-Y">Yellow</span>`, C: `<span class="z z-C">Covered</span>` };
-    const pl = d.pilot, scale = Math.max(0.4, pl.oldTransferSpot || 0);
-    const pbar = (label, v) => `<div class="pb-row"><span>${label}</span><span class="pb-track"><i style="width:${((v || 0) / scale) * 100}%"></i></span><b>${p(v)}</b></div>`;
-    $("#x-watch").innerHTML = `
-      <div class="x-box"><p class="big-label">Early warning</p>${d.earlyWarning.length ? `<ul class="watch">${d.earlyWarning.map((w) =>
-        `<li><span>${esc(ewName(w.lane))} · wk ${esc(fmtShort(w.week))}</span>${zoneChip[w.zone]}</li>`).join("")}</ul>` : `<p class="x-sub">All green.</p>`}</div>
-      <div class="x-box"><p class="big-label">Denials and overrides</p>${d.denials.length ? `<ul class="watch">${d.denials.map((x) =>
-        `<li><span>${esc(E.poNumber(items, x.it))} · ${esc(custName(x.it.data.customer))}</span><span class="muted">${esc(HUBS[x.team]?.name || x.team)}: ${esc(x.why)}</span></li>`).join("")}</ul>` : `<p class="x-sub">No denials.</p>`}
-        <p class="x-sub">0 VP overrides</p></div>
-      <div class="x-box"><p class="big-label">Monticello pilot · transfer spot</p>
-        <div class="pb">${pbar("Old way", pl.oldTransferSpot)}${pbar("Now", pl.transferSpot)}<i class="pb-line" style="left:calc(64px + (100% - 64px - 48px) * ${RULES.pilotGoNoGo / scale})"></i></div>
-        <p class="x-sub">Scale up below ${pct(RULES.pilotGoNoGo)} · saved ${money(pl.saved)}</p></div>`;
     // Cost to serve, broken down.
     const rowName = (k) => (k === "transfers" ? "Prebuilds" : custName(k));
     $("#x-cost").innerHTML = d.cost.length ? `<p class="big-label">Cost to serve, by customer</p><table class="tbl x-tbl"><thead><tr><th></th><th>Loads</th><th>Freight</th><th>+ Spot</th><th>+ Holding</th><th>− Fees</th><th>Per load</th></tr></thead><tbody>
