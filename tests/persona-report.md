@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 11:39:13 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 11:40:16 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -29,7 +29,7 @@ Run: 11/4/2026, 11:39:13 PM · http://localhost:8765/ · backup mode, today = Th
 | Bo (customer, PepsiCo buyer) | Rush: order 0.4 million cans for Sat Nov 7 (2 days out). | yes | 2 | 0 |
 | Sam (Sales) | Deny the rush order, then change my mind and accept it. | yes | 4 | 0 |
 | Ivy (Inventory) | Check how many labeled cans each customer has left. | yes | 2 | 0 |
-| Pia (Planning) | Check line time and the yearly baseline. | yes | 3 | 2 |
+| Pia (Planning) | Check line time and the yearly baseline. | yes | 3 | 0 |
 | Sam (Sales) | Try to contact carriers even though I'm in Sales. | yes | 1 | 0 |
 | Erin (Executive) | Check the three shared numbers, each team and its guardrail, what we saved, and what is going out. | yes | 1 | 1 |
 
@@ -303,10 +303,6 @@ Run: 11/4/2026, 11:39:13 PM · http://localhost:8765/ · backup mode, today = Th
 ## Pia (Planning)
 *Check line time and the yearly baseline.*
 
-**Friction:**
-- "long-term": a 26-word line: "Every truckload a month, all lanes (Ball's workbook, no shuttles). Planning uses it to set…"
-- "long-term": jargon a Pia may not know: baseline.
-
 **What I did:**
 - Opened the Planning hub
 - Clicked "Line time"
@@ -315,7 +311,7 @@ Run: 11/4/2026, 11:39:13 PM · http://localhost:8765/ · backup mode, today = Th
 
 **Screens:**
 - line time: 61 words, longest line 6 words, main button none · `18-edge-line-line-time.png`
-- long-term: 120 words, longest line 26 words, main button none · `19-edge-line-long-term.png`
+- long-term: 117 words, longest line 12 words, main button none · `19-edge-line-long-term.png`
 
 ## Sam (Sales)
 *Try to contact carriers even though I'm in Sales.*

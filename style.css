@@ -481,9 +481,10 @@ a.x-name .ic { margin: 0 0 0 4px; width: .9em; }
 .readonly .m-load { cursor: default; }
 .readonly .m-day { min-height: 70px; }
 /* Long-term: says what it is and what it means */
-.lt-lead { margin: -4px 0 14px; color: var(--muted); max-width: 70ch; }
+.lt-lead { margin: -4px 0 6px; color: var(--muted); max-width: 70ch; }
 .lt-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
 .lt-fact { background: var(--cream); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
 .lt-fact b { font-size: 16px; }
 .lt-fact span { font-size: 13px; color: var(--muted); }
 .lt-so { grid-column: 1 / -1; margin: 0; font-weight: 600; }
+.lt-lead + .lt-lead { margin-bottom: 14px; }

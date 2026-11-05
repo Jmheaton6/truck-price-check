@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=56";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=56";
+import * as E from "./engine.js?v=57";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=57";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -848,7 +848,8 @@ function shorttermView(store, state) {
 // ---------- Ball HQ · Planning · Long-term: the plant's real monthly loads and next year's baseline ----------
 function longtermView() {
   const html = `<section class="panel"><h1>Trucks leaving Monticello, by month</h1>
-    <p class="lt-lead">Every truckload a month, all lanes (Ball's workbook, no shuttles). Planning uses it to set next year's baseline and to tell carriers months ahead what's coming.</p>
+    <p class="lt-lead">Every truck that left Monticello each month (Ball's workbook, no shuttles).</p>
+    <p class="lt-lead">Planning uses it to plan next year and warn carriers months ahead.</p>
     <div id="lt-facts" class="lt-facts"></div>
     <span class="legend line-legend"><i class="lb lb-2025"></i>2025 actual <i class="lb lb-used"></i>2026 actual <i class="lb lb-fc"></i>2026 plan = same month in 2025 + 2%</span>
     <div id="lt" class="lt"></div><p class="small">Number under each month = 2026 trucks (actual through July, plan after).</p></section>`;
