@@ -2,15 +2,16 @@
 //
 // How a truck gets booked (the case + our deck): every lane has a routing guide of up to 3 contract carriers.
 // Each carrier committed to so many loads a week, about 1/7 of that a day. A load goes to the primary first
-// (it needs 3+ days' notice), then backup 1, then backup 2. If none has room that day, a customer gets a
+// (it needs 48+ hours' notice), then backup 1, then backup 2. If none has room that day, a customer gets a
 // counteroffer date; if they keep their date, it goes spot and they pay the spot premium as an expedite fee.
 // Spot is the last resort.
-import { LANES, MONTHLY } from "./lanes.js?v=52";
+import { LANES, MONTHLY } from "./lanes.js?v=53";
 export { MONTHLY };
 
 export const RULES = {
   profitPerTruck: 3100,  // Ball's average operating profit per truckload (FY2025 10-K ÷ cans shipped; see README)
-  noticeDays: 3,         // the primary carrier needs 3+ days' notice; customer orders inside 3 days are late changes
+  noticeDays: 3,         // orders lock 3 days out: a customer order inside 3 days is a late change
+  tenderDays: 2,         // carriers are contacted 48+ hours ahead; the primary needs that much notice
   freezeDays: 3,         // production runs lock 3 days before they start
   makeLeadDays: 2,       // cans are made about 2 days before they ship
   cansPerTruck: 200000,  // about one full truckload of 12 oz cans
@@ -163,7 +164,7 @@ export const overspend = (lane, spot) => spot * lane.spot_premium;
 
 // ---------- The tender: who takes each truck ----------
 // moves: [{ it, lane, day, n, tenderOn, held }]. Booked moves hold their trucks first; the rest go in line,
-// Priority customers first, then first come first served. For each move: primary (if tendered 3+ days ahead),
+// Priority customers first, then first come first served. For each move: primary (if contacted 2+ days ahead),
 // then backup 1, then backup 2, each up to its daily share and what's left of its weekly commitment.
 function tender(moves, now, extra = new Map()) {
   const usedDay = new Map(), usedWeek = new Map(), usedExtra = new Map();
@@ -171,10 +172,10 @@ function tender(moves, now, extra = new Map()) {
   for (const m of moves) {
     let left = m.n;
     const got = [];
-    // A carrier's room that day: its daily share and what's left of its weekly commitment. The primary needs 3+ days' notice.
+    // A carrier's room that day: its daily share and what's left of its weekly commitment. The primary needs 48+ hours' notice.
     const keys = (c) => [`${m.lane.key}|${c.tier}|${m.day}`, `${m.lane.key}|${c.tier}|${weekKey(m.day)}`];
     const roomOf = (c) => {
-      if (c.tier === 0 && daysBetween(m.tenderOn, m.day) < RULES.noticeDays) return 0;
+      if (c.tier === 0 && daysBetween(m.tenderOn, m.day) < RULES.tenderDays) return 0;
       const [dk, wk] = keys(c);
       return Math.max(0, Math.min(c.daily - (usedDay.get(dk) || 0), c.weekly - (usedWeek.get(wk) || 0)));
     };
@@ -321,7 +322,7 @@ export function transferOptions(items, it, now) {
   // Paced: one day at a time, as many as still fit on contract that day.
   const days = [];
   let left = n;
-  const start = daysBetween(now, it.data.ready) >= RULES.noticeDays ? it.data.ready : addDays(now, RULES.noticeDays);
+  const start = daysBetween(now, it.data.ready) >= RULES.tenderDays ? it.data.ready : addDays(now, RULES.tenderDays);
   for (let i = 0; i < 21 && left > 0; i++) {
     const day = addDays(start, i);
     const probe = trial([...days, { day, n: left }]);
@@ -523,7 +524,7 @@ export function calendar(items, now, wk) {
     return { lane, cells, expected, perDay, perWeek, busy: cells.some((c) => c.moves.length) };
   });
 }
-// Logistics' two to-do lists, one row per order or transfer, soonest first. Book by = day − 3.
+// Logistics' two to-do lists, one row per order or transfer, soonest first. Contact by = day − 2 (48 hours).
 // toBookItems: accepted truck days no carrier has been contacted for. waitingItems: contacted, no answer yet.
 export const toBookItems = (items, now) => truckDays(items, now, (d) => !d.booked && !d.tendered);
 export const waitingItems = (items, now) => truckDays(items, now, (d) => d.tendered);
@@ -538,7 +539,7 @@ function truckDays(items, now, want) {
     if (!days.length) continue;
     out.push({ it, lane: a.lane, days, first: days[0].day, last: days.at(-1).day,
       trucks: days.reduce((s, d) => s + d.n, 0), contract: days.reduce((s, d) => s + d.contract, 0), spot: days.reduce((s, d) => s + d.spot, 0),
-      bookBy: addDays(days[0].day, -RULES.noticeDays), askedOn: days.map((d) => askedOn(it, d.day)).filter(Boolean).sort()[0] || null });
+      bookBy: addDays(days[0].day, -RULES.tenderDays), askedOn: days.map((d) => askedOn(it, d.day)).filter(Boolean).sort()[0] || null });
   }
   return out.sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : 0));
 }
@@ -663,12 +664,12 @@ export function scorecards(items, now) {
   // Planning: share of open line time used by accepted orders
   const used = os.filter((x) => x.status === "confirmed").reduce((s, x) => s + (plan.get(x.id)?.made || 0), 0);
   const open = SIM_LINE_TIME.reduce((a, b) => a + b, 0);
-  // Logistics: spot share, and share of truck-days booked 3+ days ahead
+  // Logistics: spot share, and share of truck-days handed to carriers 48+ hours ahead
   const now_ = totals(items, now);
   let days = 0, ahead = 0;
   for (const it of items) {
     if (!(it.type === "transfer" || (it.type === "order" && it.status === "confirmed"))) continue;
-    for (const day of Object.keys({ ...it.data.tendered, ...it.data.booked })) { days++; if (daysBetween(dayOfTs(askedOn(it, day)), day) >= RULES.noticeDays) ahead++; }
+    for (const day of Object.keys({ ...it.data.tendered, ...it.data.booked })) { days++; if (daysBetween(dayOfTs(askedOn(it, day)), day) >= RULES.tenderDays) ahead++; }
   }
   return {
     sales: { answerMin, answered: answered.length },

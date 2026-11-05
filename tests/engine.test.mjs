@@ -38,8 +38,8 @@ test("routing guide: primary, then backup 1, then backup 2, each up to its daily
   assert.deepEqual(got([p, more], more), [0, 0, 2]);  // no carrier has room: needs a counteroffer
 });
 
-test("short notice: the primary needs 3 days; backups can still take it", () => {
-  const p = po(COKE, 3, "2026-11-07", "confirmed"); // 2 days out
+test("short notice: the primary needs 48 hours; backups can still take it", () => {
+  const p = po(COKE, 3, "2026-11-06", "confirmed"); // 1 day out
   const a = E.allocate([p], NOW).get(p.id);
   assert.deepEqual(a.days[0].carriers.map((c) => c.tier), [1, 2]);
   assert.deepEqual([a.contract, a.counter], [2, 1]);
@@ -159,7 +159,7 @@ test("calendar and To book: accepted trucks to book; checking ones apart; foreca
   assert.equal(row.expected, 5 - 4);
   assert.equal(row.perDay, 3);
   const list = E.toBookItems([a, b], NOW);
-  assert.deepEqual([list.length, list[0].bookBy], [1, "2026-11-16"]);
+  assert.deepEqual([list.length, list[0].bookBy], [1, "2026-11-17"]);
 });
 
 test("cuts free trucks; a cut inside the freeze strands cans", () => {

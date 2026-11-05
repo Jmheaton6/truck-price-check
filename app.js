@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=52";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=52";
+import * as E from "./engine.js?v=53";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=53";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -662,7 +662,7 @@ function calendarView(store, state) {
           return m.it.type === "order" && m.spot ? `<div class="tip">Customer kept the date and pays the spot premium.</div>` : "";
         };
         return `<button type="button" class="linkish back" id="side-back">${icon("left")}To do</button>
-          <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.kind === "order" ? `${custName(row.lane.destination)} · ${row.lane.destination}` : row.lane.destination)}${c.toBook ? ` · contact by ${esc(fmtShort(E.addDays(day, -RULES.noticeDays)))}` : ""}</p>
+          <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.kind === "order" ? `${custName(row.lane.destination)} · ${row.lane.destination}` : row.lane.destination)}${c.toBook ? ` · contact by ${esc(fmtShort(E.addDays(day, -RULES.tenderDays)))}` : ""}</p>
           <ul class="moves">${c.moves.map((m) => `<li class="mv"><span>${m.it.type === "order" ? `${E.poNumber(items, m.it)} · ${esc(custName(m.it.data.customer))}` : "Prebuild"}</span>
             <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.counter ? ` <span class="t-ctr">${m.counter} counteroffer</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}</span>
             ${m.carriers?.length ? `<span class="mv-car">${m.carriers.map((x) => `${esc(x.name)}${x.tier === 3 ? " (extra)" : ""} ${x.n}`).join(" · ")}</span>` : ""}

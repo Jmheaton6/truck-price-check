@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 10:50:34 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 11:08:30 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -284,7 +284,7 @@ Run: 11/4/2026, 10:50:34 PM · http://localhost:8765/ · backup mode, today = Th
 - Saw the order back in play
 
 **Screens:**
-- rush order: 83 words, longest line 13 words, main button none · `16-edge-sales-rush-order.png`
+- rush order: 81 words, longest line 10 words, main button none · `16-edge-sales-rush-order.png`
 
 ## Ivy (Inventory)
 *Check how many labeled cans each customer has left.*
