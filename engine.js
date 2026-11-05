@@ -5,7 +5,7 @@
 // (it needs 48+ hours' notice), then backup 1, then backup 2. If none has room that day, a customer gets a
 // counteroffer date; if they keep their date, it goes spot and they pay the spot premium as an expedite fee.
 // Spot is the last resort.
-import { LANES, MONTHLY } from "./lanes.js?v=59";
+import { LANES, MONTHLY } from "./lanes.js?v=58";
 export { MONTHLY };
 
 export const RULES = {
@@ -399,15 +399,6 @@ export function checks(items, it, now) {
     : a.spot ? { ok: true, verdict: `${a.spot} spot · customer pays` }
     : { ok: true, verdict: names || "On contract" };
   return { sales, inventory, planning, logistics, alloc: a, plan: p };
-}
-
-// ---------- Reset demo: the story starts with one Coca-Cola PO already in ----------
-// 0.6 million cans (3 truckloads) for the Thursday two weeks out, all four teams accepted, carriers confirmed.
-export function demoSeed(now, at) {
-  const date = addDays(weekKey(now), 18);
-  const ok = { ok: true, at };
-  return [{ type: "order", status: "confirmed", data: { kind: "po", customer: "Random Lake, WI", trucks: 3, cans: 3 * RULES.cansPerTruck, date,
-    placed: addDays(now, -7), signoffs: Object.fromEntries(TEAMS.map((t) => [t, ok])), decided_at: at, tendered: { [date]: at }, booked: { [date]: at } } }];
 }
 
 // ---------- Accept, deny, counteroffer ----------
