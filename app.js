@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=57";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=57";
+import * as E from "./engine.js?v=58";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=58";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);

@@ -488,3 +488,9 @@ a.x-name .ic { margin: 0 0 0 4px; width: .9em; }
 .lt-fact span { font-size: 13px; color: var(--muted); }
 .lt-so { grid-column: 1 / -1; margin: 0; font-weight: 600; }
 .lt-lead + .lt-lead { margin-bottom: 14px; }
+/* To-do rows: the card shrinks so its button stays inside the side panel */
+.tb-row .row { min-width: 0; }
+.tb-row > .util { flex: none; }
+.tobook .row-top { flex-wrap: wrap; row-gap: 2px; }
+.tobook .row-top strong { white-space: normal; }
+.tobook + .cta { margin-bottom: 22px; }
