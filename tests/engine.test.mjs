@@ -255,3 +255,37 @@ test("dashboard: shared numbers, guardrails and cost to serve", () => {
   assert.equal(Math.round(coke.perLoad), E.laneOf("order", COKE).contract_cost);
   assert.equal(d.sales.changeCost, 0);
 });
+
+test("split counteroffer: too many for one day spreads over the next days (shift up to 2), all on contract", () => {
+  let p = po(COKE, 5, "2026-11-19");
+  for (const team of ["sales", "inventory", "planning"]) { const u = E.decide([p], p, team, true, AT, NOW); p = { ...p, ...u }; }
+  assert.deepEqual(got([p], p), [3, 0, 2]);                              // 3 a day on contract; 2 short
+  const plan = E.counterPlan([p], p, NOW);
+  assert.deepEqual(plan.days, [{ day: "2026-11-19", n: 3 }, { day: "2026-11-20", n: 2 }]);
+  const offered = { ...p, data: E.counteroffer([p], p, AT, NOW).data };
+  const yes = { ...offered, ...E.answerCounter(offered, true, AT) };
+  assert.deepEqual([yes.status, yes.data.date], ["confirmed", "2026-11-19"]);
+  assert.deepEqual(got([yes], yes), [5, 0, 0]);
+  const cal = E.calendar([yes], NOW, 2).find((r) => r.lane.destination === COKE);
+  assert.deepEqual(cal.cells.filter((c) => c.moves.length).map((c) => [c.day, c.contract]), [["2026-11-19", 3], ["2026-11-20", 2]]);
+  // a cut comes off the last day
+  assert.deepEqual(E.orderDays(yes, 4), [{ day: "2026-11-19", n: 3 }, { day: "2026-11-20", n: 1 }]);
+});
+
+test("carrier states: contact carrier → waiting on carrier → confirmed, per truck day", () => {
+  const p = allAccept([], po(COKE, 3, "2026-11-19"));
+  assert.equal(E.stageOf(p), "accepted");
+  assert.deepEqual([E.toBookItems([p], NOW).length, E.waitingItems([p], NOW).length], [1, 0]);
+  const asked = { ...p, data: { ...p.data, tendered: { "2026-11-19": AT } } };
+  assert.equal(E.stageOf(asked), "tendered");
+  assert.deepEqual([E.toBookItems([asked], NOW).length, E.waitingItems([asked], NOW).length], [0, 1]);
+  assert.equal(E.waitingItems([asked], NOW)[0].askedOn, AT);
+  const cell = E.calendar([asked], NOW, 2).find((r) => r.lane.destination === COKE).cells.find((c) => c.day === "2026-11-19");
+  assert.deepEqual([cell.toBook, cell.tendered, cell.booked], [0, 3, 0]);
+  const yes = { ...asked, data: { ...asked.data, booked: { "2026-11-19": AT } } };
+  assert.equal(E.stageOf(yes), "booked");
+  assert.deepEqual([E.toBookItems([yes], NOW).length, E.waitingItems([yes], NOW).length], [0, 0]);
+  // a contacted truck day holds its carriers ahead of a later order on the same day
+  const later = allAccept([asked], po(COKE, 3, "2026-11-19"));
+  assert.deepEqual(got([later, asked], asked), [3, 0, 0]);
+});

@@ -5,7 +5,7 @@
 // (it needs 3+ days' notice), then backup 1, then backup 2. If none has room that day, a customer gets a
 // counteroffer date; if they keep their date, it goes spot and they pay the spot premium as an expedite fee.
 // Spot is the last resort.
-import { LANES, MONTHLY } from "./lanes.js?v=50";
+import { LANES, MONTHLY } from "./lanes.js?v=52";
 export { MONTHLY };
 
 export const RULES = {
@@ -78,15 +78,28 @@ export const trucksFromCans = (cans) => Math.max(1, Math.ceil(cans / RULES.cansP
 // order:    a customer PO (data.kind "po") or a change to one (data.kind "change", parent, trucks ±).
 //           data { customer, kind, parent?, trucks, cans, date, placed, signoffs{team:{ok,at}}, denied?{team,why},
 //                  retry_of?, counter?{date, at, answer?: "accepted"|"kept"}, asked? (date before a counteroffer),
-//                  expedite? (customer kept their date: spot, they pay the premium), booked{day:ts} }
+//                  expedite? (customer kept their date: spot, they pay the premium), days? [{day, n}] (split over
+//                  2–3 days after a split counteroffer), tendered{day:ts} (carrier contacted), booked{day:ts} (carrier said yes) }
 //           status: waiting (being checked) → confirmed (all four accepted) or declined (a department denied it)
 // transfer: a prebuild Ball moves to a warehouse. Planning creates it (status waiting, data { destination, trucks,
-//           ready, by }); Logistics schedules it (status booked, data.days [{day, n}], data.booked{day:ts}).
+//           ready, by }); Logistics schedules it (status booked, data.days [{day, n}]), then contacts the carriers
+//           (data.tendered{day:ts}) and records their yes (data.booked{day:ts}).
+// Every truck day goes: contact carrier → waiting on carrier → confirmed.
 // forecast: a customer's new forecast for one week. data { customer, week (that Sunday), trucks, on }.
 export const TEAMS = ["sales", "inventory", "planning", "logistics"];
 export const isActive = (it) => it.status !== "declined";
 export const itemLane = (it) => it.type === "order" ? laneOf("order", it.data.customer) : laneOf("transfer", it.data.destination);
 export const dateOf = (it) => (it.type === "transfer" ? it.data.ready : it.data.date);
+// The days an order ships: its date, or the split a customer accepted. n = trucks after accepted cuts (off the last day).
+export function orderDays(it, n = it.data.trucks) {
+  if (!it.data.days?.length) return [{ day: it.data.date, n }];
+  const days = it.data.days.map((d) => ({ ...d }));
+  let cut = days.reduce((s, d) => s + d.n, 0) - n;
+  for (let i = days.length - 1; i >= 0 && cut > 0; i--) { const k = Math.min(cut, days[i].n); days[i].n -= k; cut -= k; }
+  return days.filter((d) => d.n > 0);
+}
+// When a truck day was handed to carriers (contacted or confirmed), if it was.
+const askedOn = (it, day) => it.data.tendered?.[day] || it.data.booked?.[day] || null;
 export const byCreated = (a, b) =>
   a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1
   : String(a.id) === String(b.id) ? 0 : String(a.id) < String(b.id) ? -1 : 1;
@@ -216,11 +229,13 @@ export function allocate(items, now) {
     if (it.type === "order") {
       if (it.data.trucks < 0) { result.set(it.id, { lane, trucks: it.data.trucks, cut: -it.data.trucks, days: [], contract: 0, spot: 0, counter: 0, ballSpot: 0, fee: 0, overspend: 0 }); continue; }
       const n = Math.max(0, it.data.trucks - (cut.get(String(it.id)) || 0));
-      const ts = it.data.booked?.[it.data.date];
-      if (n) moves.push({ it, lane, day: it.data.date, n, tenderOn: ts ? dayOfTs(ts) : now, held: ts ? 1 : 0 });
+      if (n) for (const d of orderDays(it, n)) {
+        const ts = askedOn(it, d.day);
+        moves.push({ it, lane, day: d.day, n: d.n, tenderOn: ts ? dayOfTs(ts) : now, held: ts ? 1 : 0 });
+      }
     } else if (it.type === "transfer" && it.status === "booked") {
       for (const d of it.data.days || [{ day: it.data.ready, n: it.data.trucks }]) {
-        const ts = it.data.booked?.[d.day];
+        const ts = askedOn(it, d.day);
         moves.push({ it, lane, day: d.day, n: d.n, tenderOn: ts ? dayOfTs(ts) : now, held: ts ? 1 : 0 });
       }
     }
@@ -236,7 +251,8 @@ export function allocate(items, now) {
     const counter = g.short - spot;
     r.trucks += m.n; r.contract += g.contract; r.spot += spot; r.counter += counter;
     if (exp) r.fee += overspend(m.lane, spot); else r.ballSpot += spot;
-    r.days.push({ day: m.day, n: m.n, carriers: g.carriers, contract: g.contract, spot, counter, booked: !!m.held });
+    const booked = !!m.it.data.booked?.[m.day], tendered = !booked && !!m.it.data.tendered?.[m.day];
+    r.days.push({ day: m.day, n: m.n, carriers: g.carriers, contract: g.contract, spot, counter, booked, tendered });
     r.overspend = overspend(m.lane, r.ballSpot);
     result.set(m.it.id, r);
   }
@@ -386,14 +402,15 @@ export function checks(items, it, now) {
 
 // ---------- Accept, deny, counteroffer ----------
 // stage: checking → offered (Logistics counteroffered; the customer decides) → accepted → booked, or denied.
-export const STAGES = { checking: "Checking", offered: "Counteroffer", accepted: "Accepted", booked: "Booked", denied: "Denied" };
+export const STAGES = { checking: "Checking", offered: "Counteroffer", accepted: "Accepted", tendered: "Carrier asked", booked: "Booked", denied: "Denied" };
 export function stageOf(it) {
   if (it.type === "transfer") return it.status === "booked" ? "booked" : "checking";
   if (it.status === "declined") return "denied";
   if (it.data.counter && !it.data.counter.answer) return "offered";
   if (it.status !== "confirmed") return "checking";
   if (it.data.trucks < 0) return "booked"; // an accepted cut frees trucks; nothing to book
-  return it.data.booked?.[dateOf(it)] ? "booked" : "accepted";
+  const days = orderDays(it).map((d) => d.day);
+  return days.every((d) => it.data.booked?.[d]) ? "booked" : days.every((d) => askedOn(it, d)) ? "tendered" : "accepted";
 }
 const statusOf = (signoffs) => (TEAMS.find((t) => signoffs[t]?.ok === false) ? "declined" : TEAMS.every((t) => signoffs[t]?.ok === true) ? "confirmed" : "waiting");
 // A department's answer. Any deny stops the order; four accepts confirm it. Answers can change until it's booked.
@@ -427,11 +444,36 @@ export function betterDate(items, it, now) {
   }
   return null;
 }
-// Logistics sends a counteroffer: the nearest date the routing guide covers. If no date in 2 weeks works,
-// the offer is spot on the customer's own date (date: null): they keep it and pay, or cancel.
+// Spread an order over its date and up to 2 days after (the deck: "hold or shift up to 2 days"): as many trucks
+// as fit on contract each day, starting on the date asked. Only when it needs 2+ days and then every check passes.
+export function spreadOffer(items, it, now) {
+  if (it.data.trucks <= 0) return null;
+  const orig = it.data.asked || it.data.date;
+  const last = addDays(weekKey(now), RULES.weeks * 7 - 1);
+  const base = items.map((x) => (x.id === it.id ? { ...x, status: "waiting" } : x));
+  const trial = (days) => {
+    const moved = { ...it, status: "waiting", data: { ...it.data, date: days[0].day, days, expedite: false, tendered: {}, booked: {} } };
+    return checks(base.map((x) => (x.id === it.id ? moved : x)), moved, now);
+  };
+  const days = [];
+  let left = it.data.trucks;
+  for (let i = 0; i <= 2 && left > 0; i++) {
+    const day = addDays(orig, i);
+    if (day > last) break;
+    const fit = trial([...days, { day, n: left }]).alloc.contract - days.reduce((s, d) => s + d.n, 0);
+    if (fit > 0) { const k = Math.min(fit, left); days.push({ day, n: k }); left -= k; }
+  }
+  if (left > 0 || days.length < 2) return null;
+  const c = trial(days);
+  return TEAMS.every((t) => c[t].ok) && !c.alloc.spot && !c.alloc.counter ? { date: days[0].day, days, alloc: c.alloc } : null;
+}
+// What Logistics offers when the routing guide is short: a split (most trucks keep the date), else the nearest
+// date that covers it all, else spot on the customer's own date (date: null).
+export const counterPlan = (items, it, now) => spreadOffer(items, it, now) || betterDate(items, it, now) || { date: null };
+// Logistics sends a counteroffer. If nothing works in 2 weeks, the customer keeps their date and pays, or cancels.
 export function counteroffer(items, it, at, now) {
-  const better = betterDate(items, it, now);
-  return { data: { ...it.data, counter: { date: better?.date || null, at } } };
+  const plan = counterPlan(items, it, now);
+  return { data: { ...it.data, counter: { date: plan.date, ...(plan.days ? { days: plan.days } : {}), at } } };
 }
 // The customer answers: take the new date (contract), or keep theirs (spot; they pay the premium as an expedite fee).
 // Either way Logistics' check is now settled, so it counts as Logistics' accept.
@@ -442,7 +484,7 @@ export function answerCounter(it, accept, at, cancel = false) {
   }
   if (accept && !it.data.counter.date) return null;
   const c = { ...it.data.counter, answer: accept ? "accepted" : "kept", answered_at: at };
-  const data = accept ? { ...it.data, counter: c, asked: it.data.date, date: c.date } : { ...it.data, counter: c, expedite: true };
+  const data = accept ? { ...it.data, counter: c, asked: it.data.date, date: c.date, ...(c.days ? { days: c.days } : {}) } : { ...it.data, counter: c, expedite: true };
   data.signoffs = { ...(data.signoffs || {}), logistics: { ok: true, at } };
   const status = statusOf(data.signoffs);
   return { status, data: { ...data, decided_at: status === "waiting" ? null : (data.decided_at || at) } };
@@ -456,7 +498,7 @@ export function calendar(items, now, wk) {
   const start = addDays(weekKey(now), wk * 7);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   return PILOT_LANES.map((lane) => {
-    const cells = days.map((day) => ({ day, contract: 0, spot: 0, counter: 0, checking: 0, toBook: 0, booked: 0, moves: [] }));
+    const cells = days.map((day) => ({ day, contract: 0, spot: 0, counter: 0, checking: 0, toBook: 0, tendered: 0, booked: 0, moves: [] }));
     for (const it of items) {
       const a = alloc.get(it.id);
       if (!a || a.lane !== lane) continue;
@@ -465,10 +507,10 @@ export function calendar(items, now, wk) {
         const i = days.indexOf(d.day);
         if (i < 0) continue;
         const c = cells[i];
-        c.moves.push({ it, n: d.n, contract: d.contract, spot: d.spot, counter: d.counter, carriers: d.carriers, booked: d.booked, checking });
+        c.moves.push({ it, n: d.n, contract: d.contract, spot: d.spot, counter: d.counter, carriers: d.carriers, booked: d.booked, tendered: d.tendered, checking });
         if (checking) { c.checking += d.n; continue; }
         c.contract += d.contract; c.spot += d.spot; c.counter += d.counter;
-        if (d.booked) c.booked += d.n; else c.toBook += d.n;
+        if (d.booked) c.booked += d.n; else if (d.tendered) c.tendered += d.n; else c.toBook += d.n;
       }
     }
     let expected = 0;
@@ -481,19 +523,22 @@ export function calendar(items, now, wk) {
     return { lane, cells, expected, perDay, perWeek, busy: cells.some((c) => c.moves.length) };
   });
 }
-// Every accepted truck day not booked yet, one row per order or transfer, soonest first. Book by = day − 3.
-export function toBookItems(items, now) {
+// Logistics' two to-do lists, one row per order or transfer, soonest first. Book by = day − 3.
+// toBookItems: accepted truck days no carrier has been contacted for. waitingItems: contacted, no answer yet.
+export const toBookItems = (items, now) => truckDays(items, now, (d) => !d.booked && !d.tendered);
+export const waitingItems = (items, now) => truckDays(items, now, (d) => d.tendered);
+function truckDays(items, now, want) {
   const alloc = allocate(items, now);
   const out = [];
   for (const it of items) {
     const ready = it.type === "transfer" ? it.status === "booked" : it.type === "order" && it.status === "confirmed" && it.data.trucks > 0;
     const a = ready && alloc.get(it.id);
     if (!a) continue;
-    const days = a.days.filter((d) => !d.booked);
+    const days = a.days.filter(want);
     if (!days.length) continue;
     out.push({ it, lane: a.lane, days, first: days[0].day, last: days.at(-1).day,
       trucks: days.reduce((s, d) => s + d.n, 0), contract: days.reduce((s, d) => s + d.contract, 0), spot: days.reduce((s, d) => s + d.spot, 0),
-      bookBy: addDays(days[0].day, -RULES.noticeDays) });
+      bookBy: addDays(days[0].day, -RULES.noticeDays), askedOn: days.map((d) => askedOn(it, d.day)).filter(Boolean).sort()[0] || null });
   }
   return out.sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : 0));
 }
@@ -622,8 +667,8 @@ export function scorecards(items, now) {
   const now_ = totals(items, now);
   let days = 0, ahead = 0;
   for (const it of items) {
-    if (!(it.type === "transfer" || (it.type === "order" && it.status === "confirmed")) || !it.data.booked) continue;
-    for (const [day, ts] of Object.entries(it.data.booked)) { days++; if (daysBetween(dayOfTs(ts), day) >= RULES.noticeDays) ahead++; }
+    if (!(it.type === "transfer" || (it.type === "order" && it.status === "confirmed"))) continue;
+    for (const day of Object.keys({ ...it.data.tendered, ...it.data.booked })) { days++; if (daysBetween(dayOfTs(askedOn(it, day)), day) >= RULES.noticeDays) ahead++; }
   }
   return {
     sales: { answerMin, answered: answered.length },

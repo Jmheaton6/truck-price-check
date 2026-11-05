@@ -1,6 +1,6 @@
 # Persona test report
 
-Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
+Run: 11/4/2026, 10:50:34 PM · http://localhost:8765/ · backup mode, today = Thu Nov 5
 
 | Persona | Task | Done | Clicks | Issues |
 |---|---|---|---|---|
@@ -13,7 +13,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 | Ivy (Inventory) | Find the new order, read my check, answer it. | yes | 2 | 0 |
 | Pia (Planning) | Find the new order, read my check, answer it. | yes | 2 | 0 |
 | Lee (Logistics) | Find the new order, read my check, answer it. | yes | 2 | 0 |
-| Lee (Logistics) | Book the accepted order's trucks. | yes | 2 | 0 |
+| Lee (Logistics) | Contact the carriers for the accepted order, then record their yes. | yes | 3 | 0 |
 | Pat (customer, Coca-Cola buyer) | The promo grew: change the Nov 19 order to 1 million cans. | yes | 3 | 0 |
 | Sam (Sales) | A change came in. Read my check and answer. | yes | 2 | 0 |
 | Ivy (Inventory) | A change came in. Read my check and answer. | yes | 2 | 0 |
@@ -30,8 +30,8 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 | Sam (Sales) | Deny the rush order, then change my mind and accept it. | yes | 4 | 0 |
 | Ivy (Inventory) | Check how many labeled cans each customer has left. | yes | 2 | 0 |
 | Pia (Planning) | Check line time and the yearly baseline. | yes | 3 | 0 |
-| Sam (Sales) | Try to book trucks even though I'm in Sales. | yes | 1 | 0 |
-| Erin (Executive) | Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved. | yes | 1 | 0 |
+| Sam (Sales) | Try to contact carriers even though I'm in Sales. | yes | 1 | 0 |
+| Erin (Executive) | Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved. | yes | 1 | 1 |
 
 ## Pat (customer, Coca-Cola buyer)
 *Our Nov 29 week has a promo: tell Ball it'll be 1.4 million cans.*
@@ -68,10 +68,10 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Lanes"
 - Saw "Early warning"
 - Saw the promo week's trucks vs the room
-- Clicked "Add 2"
+- Clicked "Line up 2 more"
 
 **Screens:**
-- early warning: 72 words, longest line 11 words, main button none · `04-warning-early-warning.png`
+- early warning: 86 words, longest line 11 words, main button none · `04-warning-early-warning.png`
 
 ## Lee (Logistics)
 *Schedule the prebuild so it doesn't go spot.*
@@ -111,7 +111,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Accept"
 
 **Screens:**
-- Sales check: 60 words, longest line 9 words, main button none · `07-sales-sales-check.png`
+- Sales check: 80 words, longest line 10 words, main button none · `07-sales-sales-check.png`
 
 ## Ivy (Inventory)
 *Find the new order, read my check, answer it.*
@@ -121,7 +121,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Accept"
 
 **Screens:**
-- Inventory check: 60 words, longest line 9 words, main button none · `08-inventory-inventory-check.png`
+- Inventory check: 81 words, longest line 10 words, main button none · `08-inventory-inventory-check.png`
 
 ## Pia (Planning)
 *Find the new order, read my check, answer it.*
@@ -131,7 +131,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Accept"
 
 **Screens:**
-- Planning check: 63 words, longest line 9 words, main button none · `09-planning-planning-check.png`
+- Planning check: 86 words, longest line 11 words, main button none · `09-planning-planning-check.png`
 
 ## Lee (Logistics)
 *Find the new order, read my check, answer it.*
@@ -142,18 +142,20 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Accept"
 
 **Screens:**
-- Logistics check: 61 words, longest line 9 words, main button none · `10-logistics-logistics-check.png`
+- Logistics check: 81 words, longest line 10 words, main button none · `10-logistics-logistics-check.png`
 
 ## Lee (Logistics)
-*Book the accepted order's trucks.*
+*Contact the carriers for the accepted order, then record their yes.*
 
 **What I did:**
-- Clicked "Book trucks"
-- Saw a list of what to book
-- Clicked "Book"
+- Clicked "Contact carriers"
+- Saw a list of carriers to contact
+- Clicked "Contact"
+- Saw what's waiting on a carrier's answer
+- Clicked "Said yes"
 
 **Screens:**
-- lanes: 63 words, longest line 11 words, main button none · `11-book-lanes.png`
+- lanes: 110 words, longest line 11 words, main button visible · `11-book-lanes.png`
 
 ## Pat (customer, Coca-Cola buyer)
 *The promo grew: change the Nov 19 order to 1 million cans.*
@@ -195,7 +197,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Counteroffer Nov 20"
 
 **Screens:**
-- no carrier has room: 65 words, longest line 9 words, main button visible · `12-counter-no-carrier-has-room.png`
+- no carrier has room: 89 words, longest line 13 words, main button visible · `12-counter-no-carrier-has-room.png`
 
 ## Pat (customer, Coca-Cola buyer)
 *Ball offered a new date. Take it.*
@@ -247,7 +249,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Clicked "Offer spot to customer"
 
 **Screens:**
-- one-carrier lane: 71 words, longest line 10 words, main button visible · `14-edge-spot-one-carrier-lane.png`
+- one-carrier lane: 95 words, longest line 13 words, main button visible · `14-edge-spot-one-carrier-lane.png`
 
 ## Cy (customer, AB InBev buyer)
 *Keep my date and pay the fee.*
@@ -282,7 +284,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Saw the order back in play
 
 **Screens:**
-- rush order: 62 words, longest line 9 words, main button none · `16-edge-sales-rush-order.png`
+- rush order: 83 words, longest line 13 words, main button none · `16-edge-sales-rush-order.png`
 
 ## Ivy (Inventory)
 *Check how many labeled cans each customer has left.*
@@ -309,13 +311,16 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - long-term: 46 words, longest line 7 words, main button none · `19-edge-line-long-term.png`
 
 ## Sam (Sales)
-*Try to book trucks even though I'm in Sales.*
+*Try to contact carriers even though I'm in Sales.*
 
 **What I did:**
 - Opened the Sales hub
 
 ## Erin (Executive)
 *Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved.*
+
+**Friction:**
+- "executive": 174 words on screen (aim ≤ 120).
 
 **What I did:**
 - Opened the Executive hub
@@ -331,7 +336,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 - Pilot saved $5,949
 
 **Screens:**
-- executive: 120 words, longest line 8 words, main button none · `20-exec-executive.png`
+- executive: 174 words, longest line 9 words, main button none · `20-exec-executive.png`
 
 ## Final data
 | # | Type | Status | What | Date | Booked days |
@@ -339,7 +344,7 @@ Run: 11/4/2026, 6:45:34 PM · http://localhost:8765/ · backup mode, today = Thu
 | 1 | ask forecast | noted | Random Lake, WI 7 |  | 0 |
 | 2 | transfer | booked | Findlay, OH 12 |  | 4 |
 | 3 | ask room | noted |   |  | 0 |
-| 4 | order po | confirmed | Random Lake, WI 3 | 2026-11-19 | 1 |
+| 4 | order po | confirmed | Random Lake, WI 3 | 2026-11-19 | 0 |
 | 5 | order change | confirmed | Random Lake, WI 2 (of #4) | 2026-11-20 | 0 |
 | 6 | order po | confirmed | Memphis, TN 2 | 2026-11-18 | 0 |
 | 7 | order po | waiting | Alsip, IL 2 | 2026-11-07 | 0 |

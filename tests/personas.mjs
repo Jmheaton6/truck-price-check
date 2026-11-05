@@ -154,7 +154,7 @@ await task(async () => {
   await look("early warning");
   await sees("Early warning");
   await sees("7 trucks", "the promo week's trucks vs the room");
-  await click("Add 2", { exact: true });
+  await click("Line up 2 more", { exact: true });
   if (!/lined up/i.test(await toastText())) issue("No sign the extra trucks were lined up.");
 });
 
@@ -194,13 +194,16 @@ for (const [dept, who] of [["Sales", "Sam"], ["Inventory", "Ivy"], ["Planning", 
     await click("Accept", { exact: true });
   });
 }
-persona("Lee (Logistics)", "book", "Book the accepted order's trucks.");
+persona("Lee (Logistics)", "book", "Contact the carriers for the accepted order, then record their yes.");
 await task(async () => {
-  await click("Book trucks", { role: "link" });
+  await click("Contact carriers", { role: "link" });
   await look("lanes");
-  await sees("To book", "a list of what to book");
-  await click("Book", { exact: true });
-  if (!/booked/i.test(await toastText())) issue("No confirmation after booking.");
+  await sees("Contact carriers", "a list of carriers to contact");
+  await click("Contact", { exact: true });
+  if (!/contacted/i.test(await toastText())) issue("No confirmation after contacting carriers.");
+  await sees("Waiting on carrier", "what's waiting on a carrier's answer");
+  await click("Said yes", { exact: true });
+  if (!/confirmed/i.test(await toastText())) issue("No confirmation after the carrier said yes.");
 });
 
 persona("Pat (customer, Coca-Cola buyer)", "change", "The promo grew: change the Nov 19 order to 1 million cans.");
@@ -305,12 +308,12 @@ await task(async () => {
   await look("long-term");
   await sees("2026 plan", "this year's plan");
 });
-persona("Sam (Sales)", "edge-perm", "Try to book trucks even though I'm in Sales.");
+persona("Sam (Sales)", "edge-perm", "Try to contact carriers even though I'm in Sales.");
 await task(async () => {
   await go("?role=calendar" + Q);
   await iAm("Sales");
   if (await page.locator("#subnav a", { hasText: "Lanes" }).count()) issue("The Sales hub has a Lanes tab.");
-  if (await page.getByRole("button", { name: /^Book/ }).count()) issue("Sales can see Book buttons.");
+  if (await page.getByRole("button", { name: /^(Contact|Said yes|Carrier said yes)/ }).count()) issue("Sales can see carrier buttons.");
 });
 
 persona("Erin (Executive)", "exec", "Check the three shared numbers, each team and its guardrail, the watch list, and what the pilot saved.");

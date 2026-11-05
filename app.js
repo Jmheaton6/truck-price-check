@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=50";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=50";
+import * as E from "./engine.js?v=52";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=52";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -108,6 +108,9 @@ const changesOf = (items, po) => orders(items).filter((x) => isChange(x) && Stri
 const poTotal = (items, po) => po.data.trucks + changesOf(items, po)
   .filter((c) => c.status === "confirmed" && c.data.date === po.data.date).reduce((s, c) => s + c.data.trucks, 0);
 const custName = (dest) => SIM_CUSTOMERS[dest].name;
+// When an order ships: one date, or a split ("3 Thu Nov 19 + 2 Fri Nov 20").
+const splitText = (days) => days.map((d) => `${d.n} ${fmtDate(d.day)}`).join(" + ");
+const whenOf = (it) => (it.data.days?.length > 1 ? splitText(it.data.days) : fmtDate(it.data.date));
 const ICONS = {
   check: '<path d="M4.5 10.5l3.5 3.5 7.5-8"/>',
   x: '<path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>',
@@ -117,7 +120,8 @@ const ICONS = {
 const icon = (name) => `<svg class="ic ic-${name}" viewBox="0 0 20 20" aria-hidden="true">${ICONS[name]}</svg>`;
 const stageChip = (it, forCustomer = false) => {
   const st = E.stageOf(it);
-  const label = st === "checking" && !forCustomer ? `${TEAMS.filter((t) => it.data.signoffs?.[t]?.ok).length}/4 accepted` : STAGES[st];
+  const label = st === "checking" && !forCustomer ? `${TEAMS.filter((t) => it.data.signoffs?.[t]?.ok).length}/4 accepted`
+    : st === "tendered" && forCustomer ? STAGES.accepted : STAGES[st];
   return `<span class="chip chip-${st}">${label}</span>`;
 };
 // What a customer reads when a department says no.
@@ -145,12 +149,12 @@ addEventListener("error", (e) => showBroken(e.message));
 addEventListener("unhandledrejection", (e) => showBroken(e.reason?.message || String(e.reason)));
 if (typeof E.calendar !== "function") showBroken("old copy of the app");
 
-// Truck squares: one per truck. Contract booked = solid, contract to book = outline, spot = red,
-// waiting on a counteroffer = amber, not accepted yet = dashed.
+// Truck squares: one per truck. Carrier confirmed = solid, waiting on the carrier = half, carrier not contacted yet
+// = outline, spot = red, waiting on a counteroffer = amber, not accepted yet = dashed.
 function squares(moves, max = 14) {
   const parts = [];
   for (const m of moves) {
-    for (let i = 0; i < m.contract; i++) parts.push(m.checking ? "chk" : m.booked ? "con" : "con-open");
+    for (let i = 0; i < m.contract; i++) parts.push(m.checking ? "chk" : m.booked ? "con" : m.tendered ? "con-wait" : "con-open");
     for (let i = 0; i < (m.counter || 0); i++) parts.push(m.checking ? "chk" : "ctr");
     for (let i = 0; i < m.spot; i++) parts.push(m.checking ? "chk" : "spot");
   }
@@ -185,9 +189,9 @@ function offerBlock(items, it) {
   const a = E.allocate(items, NOW).get(it.id);
   if (E.stageOf(it) === "offered") {
     const fee = (a?.counter || 0) * E.itemLane(it).spot_premium;
-    const d = it.data.counter.date;
-    return `<p class="offer">No truck for ${plural(a?.counter || 0, "load")} on ${esc(fmtShort(it.data.date))}. ${d ? `Ball can do ${esc(fmtDate(d))}.` : "No contract truck in the next 2 weeks."}</p>
-      <div class="ed-btns">${d ? `<button type="button" class="util on small" data-counter="${esc(it.id)}" data-accept="1">Take ${esc(fmtShort(d))}</button>` : ""}
+    const d = it.data.counter.date, split = it.data.counter.days;
+    return `<p class="offer">No truck for ${plural(a?.counter || 0, "load")} on ${esc(fmtShort(it.data.date))}. ${split ? `Ball can ship ${esc(splitText(split))}, all on contract.` : d ? `Ball can do ${esc(fmtDate(d))}.` : "No contract truck in the next 2 weeks."}</p>
+      <div class="ed-btns">${d ? `<button type="button" class="util on small" data-counter="${esc(it.id)}" data-accept="1">${split ? "Take the split" : `Take ${esc(fmtShort(d))}`}</button>` : ""}
         <button type="button" class="util small" data-counter="${esc(it.id)}" data-accept="0">Keep ${esc(fmtShort(it.data.date))} · +${money(fee)}</button>
         ${d ? "" : `<button type="button" class="util small" data-counter="${esc(it.id)}" data-accept="cancel">Cancel</button>`}</div>`;
   }
@@ -199,7 +203,7 @@ async function answerOffer(store, state, b) {
     const it = byId(await store.list(), b.dataset.counter);
     const u = E.answerCounter(it, b.dataset.accept === "1", nowIso(), b.dataset.accept === "cancel");
     await store.update(it.id, { status: u.status, data: u.data });
-    toast(b.dataset.accept === "1" ? `Moved to ${fmtDate(u.data.date)}.` : b.dataset.accept === "cancel" ? "Cancelled." : "Kept your date. Expedite fee added.");
+    toast(b.dataset.accept === "1" ? (u.data.days?.length > 1 ? `Split: ${splitText(u.data.days)}.` : `Moved to ${fmtDate(u.data.date)}.`) : b.dataset.accept === "cancel" ? "Cancelled." : "Kept your date. Expedite fee added.");
     state.refresh();
   } catch (err) { toast("Couldn't save: " + err.message, true); b.disabled = false; }
 }
@@ -364,7 +368,7 @@ function customerPOs(store, state) {
       const open = String(po.id) === String(editing);
       return `<article class="card${open ? " card-edit" : ""}">
         <div class="card-head"><span class="pill">${E.poNumber(items, po)}</span>${stageChip(po, true)}</div>
-        <div class="o-line"><span class="o-what">${millions(total)}M cans · ${plural(total, "truckload")} · ${esc(fmtDate(po.data.date))}</span>
+        <div class="o-line"><span class="o-what">${millions(total)}M cans · ${plural(total, "truckload")} · ${esc(whenOf(po))}</span>
           ${st !== "denied" && st !== "offered" && !open ? `<button type="button" class="util small" data-change="${esc(po.id)}">Change</button>` : ""}</div>
         ${denyBlock(items, po)}${offerBlock(items, po)}
         ${open ? editor(po) : ""}
@@ -379,7 +383,7 @@ function customerPOs(store, state) {
     const changes = orders(items).filter((x) => isChange(x) && x.data.customer === state.company).reverse();
     $("#c-changes").innerHTML = changes.length ? changes.map((c) => `<article class="card">
         <div class="card-head"><span class="pill">${E.poNumber(items, c)}</span>${stageChip(c, true)}</div>
-        <div class="o-line"><span class="o-what">${changeText(items, c)} · ${esc(fmtDate(c.data.date))}</span></div>
+        <div class="o-line"><span class="o-what">${changeText(items, c)} · ${esc(whenOf(c))}</span></div>
         ${denyBlock(items, c)}${offerBlock(items, c)}
       </article>`).join("") : `<p class="empty">No changes.</p>`;
   }
@@ -413,7 +417,7 @@ function ordersView(store, state) {
           pinned = selected = co.dataset.counteroffer;
           const u = E.counteroffer(fresh, it, nowIso(), NOW);
           await store.update(it.id, { data: u.data });
-          toast(u.data.counter.date ? `Counteroffer sent: ${fmtDate(u.data.counter.date)}.` : "Spot offered to the customer.");
+          toast(u.data.counter.days ? `Counteroffer sent: ${splitText(u.data.counter.days)}.` : u.data.counter.date ? `Counteroffer sent: ${fmtDate(u.data.counter.date)}.` : "Spot offered to the customer.");
           state.refresh();
         } catch (err) { toast("Couldn't save: " + err.message, true); co.disabled = false; }
         return;
@@ -455,14 +459,15 @@ function ordersView(store, state) {
       const mine = state.dept === t;
       // Logistics: when no carrier on the routing guide has room, the move is a counteroffer, not an accept.
       const short = t === "logistics" && c.logistics.counter && !s && !offered;
-      const counter = short ? E.betterDate(items, it, NOW) || { date: null } : null;
+      const counter = short ? E.counterPlan(items, it, NOW) : null;
       const extra = t === "sales" && it.data.trucks > 0 ? `<p class="d-extra">${money(E.priceTag(c.alloc))} profit / truck</p><p class="d-extra">${reliabilityChip(items, it.data.customer)}</p>` : "";
       return `<div class="dcard ${s ? (s.ok ? "d-yes" : "d-no") : ""}${mine ? " d-mine" : ""}">
         <p class="d-name">${DEPT[t]}</p>
         <p class="d-check ${c[t].ok ? "ok" : "bad"}">${icon(c[t].ok ? "check" : "x")}${esc(c[t].verdict)}</p>${extra}
+        ${st === "checking" && mine ? `<p class="d-if"><b>If you accept:</b> ${esc(impact(t))}</p>` : ""}
         ${short && !counter.date ? `<p class="d-extra">No date in 2 weeks works</p>` : ""}
         ${t === "logistics" && offered ? `<p class="d-status">Waiting on customer</p>`
-          : mine && canAnswer && counter ? `<button type="button" class="util on wide" data-counteroffer="${esc(it.id)}">${counter.date ? `Counteroffer ${esc(fmtShort(counter.date))}` : "Offer spot to customer"}</button>
+          : mine && canAnswer && counter ? `<button type="button" class="util on wide" data-counteroffer="${esc(it.id)}">${counter.days ? `Counteroffer: split ${esc(counter.days.map((d) => `${d.n} ${fmtShort(d.day)}`).join(" + "))}` : counter.date ? `Counteroffer ${esc(fmtShort(counter.date))}` : "Offer spot to customer"}</button>
             <div class="d-btns"><button type="button" class="util" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
           : mine && canAnswer ? `<div class="d-btns"><button type="button" class="util${s?.ok === true ? " on" : !s && c[t].ok ? " rec" : ""}" data-decide="${t}" data-ok="1" data-id="${esc(it.id)}">Accept</button>
             <button type="button" class="util${s?.ok === false ? " on-no" : !s && !c[t].ok ? " rec-no" : ""}" data-decide="${t}" data-ok="0" data-id="${esc(it.id)}">Deny</button></div>`
@@ -470,16 +475,30 @@ function ordersView(store, state) {
       </div>`;
     };
     const parent = isChange(it) ? byId(items, it.data.parent) : null;
+    // What each department's accept does to the next team and to the goal (a deny stops it for everyone).
+    const n = it.data.trucks, p = c.plan || {}, a = c.alloc || {};
+    const profit = n > 0 ? E.priceTag(a) * n : 0;
+    function impact(t) {
+      if (n < 0) return t === "inventory" ? (p.frozen ? `${-n} truckloads of cans sit in stock` : "Nothing stranded")
+        : t === "planning" ? `${-n} fewer truckloads to make` : t === "logistics" ? `Frees ${plural(-n, "truck")} for other orders` : "Customer gets a yes";
+      if (t === "sales") return `${money(profit)} profit · Planning reserves ${n}`;
+      if (t === "inventory") return p.fromStock ? `${p.fromStock} from stock · Planning makes ${p.toMake}` : `Planning makes all ${n}`;
+      if (t === "planning") return !p.toMake ? "No line time needed" : p.short ? `${p.short} truckloads have no line time` : `Uses ${p.made} of ${p.open} line slots that week`;
+      return a.counter ? "Customer gets a counteroffer, not spot" : a.spot ? `${a.spot} spot, the customer pays` : `${plural(a.contract, "truck")} on contract`;
+    }
+    const goal = st === "checking" && n > 0 ? `<div class="d-goal"><p><b>If all four accept:</b> ${a.contract || 0} contract${a.spot ? ` · ${a.spot} spot` : ""}${a.counter ? ` · ${a.counter} counteroffer` : ""} · ${money(E.priceTag(a))} / truck</p>
+      <p class="muted">A deny stops it. The customer sees why.</p></div>` : "";
     return `<div class="card-head"><span class="pill">${E.poNumber(items, it)}</span>${stageChip(it)}</div>
       <h1 class="detail-h">${esc(custName(it.data.customer))}</h1>
-      <p class="d-what">${parent ? `Change: ${changeText(items, it)}` : whatOf(items, it)} · ${esc(fmtDate(it.data.date))}</p>
-      <div class="dcards">${TEAMS.map(card).join("")}</div>
+      <p class="d-what">${parent ? `Change: ${changeText(items, it)}` : whatOf(items, it)} · ${esc(whenOf(it))}</p>
+      ${goal}<div class="dcards">${TEAMS.map(card).join("")}</div>
       ${st === "denied" && it.data.denied ? `<p class="note note-no">${DEPT[it.data.denied.team]} denied: ${esc(it.data.denied.why)}</p>` : ""}
-      ${st === "accepted" ? `<p class="note note-ok">${icon("check")}Accepted · <a href="${hubLink("logistics", "calendar", { week: E.weekIndex(it.data.date, NOW) })}">Book trucks</a></p>` : ""}
+      ${st === "accepted" ? `<p class="note note-ok">${icon("check")}Accepted · <a href="${hubLink("logistics", "calendar", { week: E.weekIndex(it.data.date, NOW) })}">Contact carriers</a></p>` : ""}
+      ${st === "tendered" ? `<p class="note note-wait">Carriers contacted. Waiting on their yes.</p>` : ""}
       ${st === "booked" ? `<p class="note note-ok">${icon("check")}Trucks booked</p>` : ""}
-      ${offered ? `<p class="note note-wait">${it.data.counter.date ? `Counteroffer sent: ${esc(fmtDate(it.data.counter.date))}` : "Spot offered"}. Waiting on the customer.</p>` : ""}
+      ${offered ? `<p class="note note-wait">${it.data.counter.days ? `Counteroffer sent: ${esc(splitText(it.data.counter.days))}` : it.data.counter.date ? `Counteroffer sent: ${esc(fmtDate(it.data.counter.date))}` : "Spot offered"}. Waiting on the customer.</p>` : ""}
       ${it.data.counter?.answer === "kept" ? `<p class="note note-no">Customer kept ${esc(fmtShort(it.data.date))}: ${plural(c.alloc.spot, "spot truck")}, expedite fee ${money(c.alloc.fee)} on their PO</p>` : ""}
-      ${it.data.counter?.answer === "accepted" ? `<p class="note note-ok">${icon("check")}Customer took ${esc(fmtShort(it.data.date))} (asked ${esc(fmtShort(it.data.asked))})</p>` : ""}`;
+      ${it.data.counter?.answer === "accepted" ? `<p class="note note-ok">${icon("check")}Customer took ${it.data.days?.length > 1 ? `the split: ${esc(splitText(it.data.days))}` : `${esc(fmtShort(it.data.date))} (asked ${esc(fmtShort(it.data.asked))})`}</p>` : ""}`;
   }
 
   function live(items) {
@@ -502,6 +521,40 @@ function ordersView(store, state) {
 }
 
 // ---------- Ball HQ · Truck calendar (Logistics books from here) ----------
+const LEGEND = `<span class="legend"><i class="sq sq-con-open"></i>Contact carrier <i class="sq sq-con-wait"></i>Waiting on carrier <i class="sq sq-con"></i>Confirmed <i class="sq sq-ctr"></i>Counteroffer <i class="sq sq-spot"></i>Spot <i class="sq sq-chk"></i>Not accepted</span>`;
+// Six weeks of day boxes, one line per lane with loads that day (Logistics' calendar, and read-only on Executive).
+function monthGrid(items, linedUp, linedText, pick = null) {
+  const weeks = Array.from({ length: RULES.weeks }, (_, w) => E.calendar(items, NOW, w));
+  const first = weeks[0][0].cells[0].day, last = weeks.at(-1)[0].cells.at(-1).day;
+  const load = (r, c) => {
+    const n = c.moves.reduce((s, m) => s + m.n, 0);
+    const k = c.spot ? "spot" : c.counter ? "ctr" : c.checking === n ? "chk" : c.toBook ? "open" : c.tendered ? "wait" : "con";
+    const key = `${r.lane.key}@${c.day}`;
+    const name = r.lane.kind === "order" ? custName(r.lane.destination) : r.lane.destination.split(",")[0];
+    const extra = c.spot && c.spot < n ? ` · ${c.spot} spot` : c.counter && c.counter < n ? ` · ${c.counter} short` : "";
+    return `<button type="button" class="m-load m-${k}${pick === key ? " c-pick" : ""}" data-cell="${esc(key)}" title="${esc(r.lane.destination)}">
+      <span class="m-name">${r.lane.kind === "transfer" ? `<span class="m-tag">WH</span>` : ""}${esc(name)}</span><b>${n}${esc(extra)}</b></button>`;
+  };
+  const day = (rows, i) => {
+    const d = rows[0].cells[i].day, dt = E.atNoon(d);
+    const busy = rows.filter((r) => r.cells[i].moves.length);
+    const n = busy.reduce((s, r) => s + r.cells[i].moves.reduce((t, m) => t + m.n, 0), 0);
+    const num = d === first || dt.getDate() === 1 ? fmtShort(d) : dt.getDate();
+    return `<div class="m-day${d === NOW ? " m-today" : ""}${d < NOW ? " m-past" : ""}">
+      <div class="m-top"><span class="m-num">${esc(num)}</span>${n ? `<span class="m-tot">${plural(n, "truck")}</span>` : ""}</div>
+      ${busy.map((r) => load(r, r.cells[i])).join("")}</div>`;
+  };
+  return { label: `${fmtShort(first)} – ${fmtShort(last)}`, html: `<div class="month">
+    ${weeks[0][0].cells.map((c) => `<div class="m-dow">${esc(dow(c.day))}</div>`).join("")}
+    ${weeks.map((rows) => { const sun = rows[0].cells[0].day, ex = linedUp(items, sun);
+      return rows[0].cells.map((_, i) => day(rows, i)).join("") + (ex.length ? `<div class="m-extra">Extra trucks lined up, week of ${esc(fmtShort(sun))}: ${ex.map(linedText).join(" · ")}</div>` : ""); }).join("")}</div>
+    ${weeks.some((rows) => rows.some((r) => r.busy)) ? "" : `<p class="empty">No trucks yet. Accepted orders and scheduled prebuilds show up here.</p>`}` };
+}
+// Extra trucks Logistics lined up from an early warning, for one week (and one lane, if given).
+const linedUp = (items, week, laneKey) => items.filter((x) => x.type === "room" && x.data.week === week && (!laneKey || x.data.lane === laneKey));
+const laneName = (key) => { const l = PILOT_LANES.find((x) => x.key === key); return !l ? key : l.kind === "order" ? custName(l.destination) : l.destination.split(",")[0]; };
+const carShort = (key, name) => PILOT_LANES.find((x) => x.key === key)?.routing.find((c) => c.name === name)?.short || name;
+const linedText = (x) => `${esc(laneName(x.data.lane))} ${x.data.n > 0 ? `+${x.data.n} · ${esc(carShort(x.data.lane, x.data.carrier))}` : `−${-x.data.n} · told carriers`}`;
 function calendarView(store, state) {
   let wk = PARAMS.has("week") ? Math.min(RULES.weeks - 1, Math.max(0, +PARAMS.get("week"))) : null; // null: first week with something to book
   let pick = null; // "laneKey@day"
@@ -511,7 +564,7 @@ function calendarView(store, state) {
     <section class="panel"><div class="cal-head"><button type="button" class="util icon-btn" id="w-prev" aria-label="Previous week">${icon("left")}</button><h1 id="w-label"></h1>
       <button type="button" class="util icon-btn" id="w-next" aria-label="Next week">${icon("right")}</button>
       <span class="seg" role="group" aria-label="View"><button type="button" data-view="month">Calendar</button><button type="button" data-view="lanes">By destination</button></span>
-      <span class="legend"><i class="sq sq-con"></i>Booked <i class="sq sq-con-open"></i>To book <i class="sq sq-ctr"></i>Counteroffer <i class="sq sq-spot"></i>Spot <i class="sq sq-chk"></i>Not accepted</span></div>
+      ${LEGEND}</div>
       <div id="cal"></div></section>
     <section class="panel side" id="cal-side"></section>
   </div>`;
@@ -538,44 +591,46 @@ function calendarView(store, state) {
         ew.disabled = true;
         try {
           await store.add({ type: "room", data: { lane, week, carrier, n, on: NOW } });
-          toast(n > 0 ? `Lined up: ${carrier} +${n}, week of ${fmtShort(week)}.` : `Told carriers: ${-n} fewer, week of ${fmtShort(week)}.`);
+          toast(n > 0 ? `Lined up: ${carrier} +${n}, week of ${fmtShort(week)}. It shows under that week on the calendar.` : `Told carriers: ${-n} fewer, week of ${fmtShort(week)}.`);
           state.refresh();
         } catch (err) { toast("Couldn't save: " + err.message, true); ew.disabled = false; }
         return;
       }
-      const b = e.target.closest("button[data-book], button[data-bookall], button[data-bookitem]");
-      if (!b) return;
-      if (state.dept !== "logistics") return toast("Switch to Logistics to book.", true);
-      b.disabled = true;
+      // Logistics' two steps per truck day: contact the carrier (tendered), then record the carrier's yes (booked).
+      const b = e.target.closest("button[data-step]");
+      const sp = e.target.closest("button[data-respread]");
+      if (!b && !sp) return;
+      if (state.dept !== "logistics") return toast("Switch to Logistics to contact carriers.", true);
+      const btn = b || sp;
+      btn.disabled = true;
       try {
-        if (b.dataset.bookall || b.dataset.bookitem) {
-          // Book every unbooked truck day of one order or transfer, or of all of them.
-          const fresh = await store.list();
-          const rows = E.toBookItems(fresh, NOW).filter((x) => b.dataset.bookall || String(x.it.id) === b.dataset.bookitem);
-          const at = stamp();
-          for (const x of rows) {
-            const it = byId(fresh, x.it.id);
-            await store.update(it.id, { data: { ...it.data, booked: { ...(it.data.booked || {}), ...Object.fromEntries(x.days.map((d) => [d.day, at])) } } });
-          }
-          toast(`Booked ${plural(rows.reduce((s, x) => s + x.trucks, 0), "truck")}.`);
+        const fresh = await store.list();
+        const at = stamp();
+        if (sp) {
+          // Spread a scheduled prebuild over paced days; nothing confirmed yet, so carriers are contacted again.
+          const it = byId(fresh, sp.dataset.respread);
+          const o = E.transferOptions(fresh, it, NOW).paced;
+          await store.update(it.id, { data: { ...it.data, days: o.days, tendered: {}, booked: {} } });
+          toast(`Spread over ${plural(o.days.length, "day")}: ${o.contract} on contract.`);
           return state.refresh();
         }
-        const [key, day] = b.dataset.cellkey.split("@");
-        const lane = PILOT_LANES.find((l) => l.key === key);
-        {
-          // Book every accepted truck on this lane and day.
-          const fresh = await store.list();
-          const row = E.calendar(fresh, NOW, E.weekIndex(day, NOW)).find((r) => r.lane.key === key);
-          const c = row.cells.find((x) => x.day === day);
-          for (const m of c.moves.filter((x) => !x.checking && !x.booked)) {
-            const it = byId(fresh, m.it.id);
-            await store.update(it.id, { data: { ...it.data, booked: { ...(it.data.booked || {}), [day]: stamp() } } });
-          }
-          toast(`Booked: ${fmtDate(day)}, ${lane.destination}.`);
+        const field = b.dataset.step === "tender" ? "tendered" : "booked";
+        // Which truck days: one lane-day (cell), one order or transfer (item), or every one on the list (all).
+        const list = field === "tendered" ? E.toBookItems(fresh, NOW) : E.waitingItems(fresh, NOW);
+        let rows = list.filter((x) => b.dataset.all || String(x.it.id) === b.dataset.item);
+        if (b.dataset.daycell) {
+          const [key, day] = b.dataset.daycell.split("@");
+          rows = list.filter((x) => x.lane.key === key).map((x) => ({ ...x, days: x.days.filter((d) => d.day === day) })).filter((x) => x.days.length);
         }
+        for (const x of rows) {
+          const it = byId(fresh, x.it.id);
+          await store.update(it.id, { data: { ...it.data, [field]: { ...(it.data[field] || {}), ...Object.fromEntries(x.days.map((d) => [d.day, at])) } } });
+        }
+        const n = rows.reduce((s, x) => s + x.days.reduce((t, d) => t + d.n, 0), 0);
+        toast(field === "tendered" ? `Contacted carriers for ${plural(n, "truck")}. Now waiting on their yes.` : `Confirmed: ${plural(n, "truck")}.`);
         state.refresh();
       } catch (err) { toast("Couldn't save: " + err.message, true); }
-      finally { b.disabled = false; }
+      finally { btn.disabled = false; }
     });
   }
 
@@ -587,15 +642,36 @@ function calendarView(store, state) {
       const row = rows.find((r) => r.lane.key === key);
       const c = row?.cells.find((x) => x.day === day);
       if (c) {
-        return `<button type="button" class="linkish back" id="side-back">${icon("left")}To book</button>
-          <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.kind === "order" ? `${custName(row.lane.destination)} · ${row.lane.destination}` : row.lane.destination)}${c.toBook ? ` · book by ${esc(fmtShort(E.addDays(day, -RULES.noticeDays)))}` : ""}</p>
+        const alloc = E.allocate(items, NOW);
+        const stateOf = (m) => (m.checking ? "" : m.booked ? `<span class="st st-con">${icon("check")}Confirmed</span>`
+          : m.tendered ? `<span class="st st-wait">Waiting on carrier · asked ${esc(fmtShort(E.dayOfTs(m.it.data.tendered[day])))}</span>` : `<span class="st st-open">Contact carrier</span>`);
+        // Suggestions: spread it so every truck fits the carriers' daily share (the deck: shift up to 2 days before spot).
+        const tip = (m) => {
+          if (m.checking) return "";
+          if (m.it.type === "transfer" && m.spot && !Object.keys(m.it.data.booked || {}).length) {
+            const o = E.transferOptions(items, m.it, NOW).paced, cur = alloc.get(m.it.id);
+            if (o.spot >= cur.spot) return "";
+            return `<div class="tip"><b>Spread it:</b> ${o.days.map((d) => `${d.n} ${fmtShort(d.day)}`).join(" · ")} → ${o.contract} contract, saves ${money(cur.overspend - o.overspend)}
+              ${isLog ? `<button type="button" class="util small on" data-respread="${esc(m.it.id)}">Spread it</button>` : ""}</div>`;
+          }
+          if (m.it.type === "order" && m.counter) {
+            const plan = E.counterPlan(items, m.it, NOW);
+            return `<div class="tip"><b>${plan.days ? "Split it" : plan.date ? "New date" : "No contract date"}:</b> ${plan.days ? `${esc(splitText(plan.days))}, all contract` : plan.date ? `${esc(fmtDate(plan.date))}, all contract` : "spot, the customer pays"}.
+              <a href="${hubLink("logistics", "orders")}#${esc(m.it.id)}">Send it from Orders</a></div>`;
+          }
+          return m.it.type === "order" && m.spot ? `<div class="tip">Customer kept the date and pays the spot premium.</div>` : "";
+        };
+        return `<button type="button" class="linkish back" id="side-back">${icon("left")}To do</button>
+          <h2>${esc(fmtDate(day))}</h2><p class="side-lane">${esc(row.lane.kind === "order" ? `${custName(row.lane.destination)} · ${row.lane.destination}` : row.lane.destination)}${c.toBook ? ` · contact by ${esc(fmtShort(E.addDays(day, -RULES.noticeDays)))}` : ""}</p>
           <ul class="moves">${c.moves.map((m) => `<li class="mv"><span>${m.it.type === "order" ? `${E.poNumber(items, m.it)} · ${esc(custName(m.it.data.customer))}` : "Prebuild"}</span>
-            <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.counter ? ` <span class="t-ctr">${m.counter} counteroffer</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}${m.booked ? ` ${icon("check")}` : ""}</span>
-            ${m.carriers?.length ? `<span class="mv-car">${m.carriers.map((x) => `${esc(x.name)} ${x.n}`).join(" · ")}</span>` : ""}</li>`).join("") || `<li class="empty">Nothing moving.</li>`}</ul>
+            <span>${m.checking ? `<span class="t-chk">${m.n} not accepted</span>` : `${m.contract ? `<span class="t-con">${m.contract} contract</span>` : ""}${m.counter ? ` <span class="t-ctr">${m.counter} counteroffer</span>` : ""}${m.spot ? ` <span class="t-spot">${m.spot} spot</span>` : ""}`}</span>
+            ${m.carriers?.length ? `<span class="mv-car">${m.carriers.map((x) => `${esc(x.name)}${x.tier === 3 ? " (extra)" : ""} ${x.n}`).join(" · ")}</span>` : ""}
+            ${stateOf(m)}${tip(m)}</li>`).join("") || `<li class="empty">Nothing moving.</li>`}</ul>
           <p class="big-label">Routing guide</p>
           <ul class="moves rg">${row.lane.routing.map((x) => `<li><span>${E.TIERS[x.tier]} · ${esc(x.name)}</span><span>${x.daily}/day · ${x.weekly}/wk</span></li>`).join("")}</ul>
-          ${isLog && c.toBook ? `<button type="button" class="cta" data-book="1" data-cellkey="${esc(pick)}">Book ${plural(c.toBook, "truck")}</button>` : ""}
-          ${!isLog && c.toBook ? `<p class="small">Logistics books this.</p>` : ""}`;
+          ${isLog && c.toBook ? `<button type="button" class="cta" data-step="tender" data-daycell="${esc(pick)}">Contact carriers · ${plural(c.toBook, "truck")}</button>` : ""}
+          ${isLog && c.tendered ? `<button type="button" class="cta" data-step="confirm" data-daycell="${esc(pick)}">Carrier said yes · ${plural(c.tendered, "truck")}</button>` : ""}
+          ${!isLog && (c.toBook || c.tendered) ? `<p class="small">Logistics contacts the carriers.</p>` : ""}`;
       }
     }
     // Early warning: weeks ahead that don't fit the routing guide. Logistics lines up extra trucks (or tells carriers fewer).
@@ -603,24 +679,32 @@ function calendarView(store, state) {
     const heads = warn.length ? `<h2>Early warning</h2><div class="ew-list">${warn.map((w) => {
       const id = `${w.lane.key}@${w.week}`;
       return `<div class="ew-row ew-${w.zone}"><span class="row-top"><strong>${esc(w.lane.kind === "order" ? custName(w.lane.destination) : w.lane.destination.split(",")[0])}</strong><span>week of ${esc(fmtShort(w.week))}</span></span>
-        <span class="row-sub">${plural(w.trucks, "truck")} · room for ${w.room}</span>
+        <span class="row-sub">${w.lane.kind === "order" ? "Forecast" : "Prebuild"} ${plural(w.trucks, "truck")} · carriers committed to ${w.room}</span>
         ${!isLog ? "" : w.diff > 0 ? `<span class="ew-fix"><select aria-label="Carrier" data-ewcar="${esc(id)}">${w.lane.routing.map((c) => `<option value="${esc(c.name)}">${esc(c.short)}</option>`).join("")}</select>
-          <button type="button" class="util small" data-ew="${esc(id)}" data-n="${w.open}">Add ${w.open}</button></span>`
-          : `<span class="ew-fix"><button type="button" class="util small" data-ew="${esc(id)}" data-n="${-w.open}">Tell carriers −${w.open}</button></span>`}</div>`; }).join("")}</div>
+          <button type="button" class="util small" data-ew="${esc(id)}" data-n="${w.open}">Line up ${w.open} more</button></span>`
+          : `<span class="ew-fix"><button type="button" class="util small" data-ew="${esc(id)}" data-n="${-w.open}">Tell carriers ${w.open} fewer</button></span>`}</div>`; }).join("")}</div>
       ${isLog ? "" : `<p class="small">Logistics lines these up.</p>`}` : "";
-    // What to book: one row per order or transfer, soonest first, each with Book; Book all at the bottom.
-    const list = E.toBookItems(items, NOW);
-    if (!list.length) return `${heads}<h2>To book</h2><p class="empty">All booked.</p>`;
+    const weeksAhead = Array.from({ length: RULES.weeks }, (_, w) => E.addDays(E.weekKey(NOW), w * 7));
+    const lined = weeksAhead.flatMap((week) => linedUp(items, week).map((x) => ({ week, x })));
+    const extras = lined.length ? `<h2>Extra trucks lined up</h2><ul class="moves lined">${lined.map(({ week, x }) =>
+      `<li><span>${linedText(x)}</span><span>week of ${esc(fmtShort(week))}</span></li>`).join("")}</ul>
+      <p class="small">Used when that week's orders are booked, before any spot.</p>` : "";
+    // Logistics' to-do: carriers to contact (soonest contact-by first), then contacted carriers that haven't said yes.
+    const contact = E.toBookItems(items, NOW), waiting = E.waitingItems(items, NOW);
     const name = (x) => (x.it.type === "order" ? `${E.poNumber(items, x.it)} ${custName(x.lane.destination)}` : x.lane.destination.split(",")[0]);
     const when = (x) => (x.it.type === "transfer" ? "Prebuild · " : "") + (x.first === x.last ? `${dow(x.first)} ${fmtShort(x.first)}`
       : E.atNoon(x.first).getMonth() === E.atNoon(x.last).getMonth() ? `${fmtShort(x.first)}–${E.atNoon(x.last).getDate()}` : `${fmtShort(x.first)}–${fmtShort(x.last)}`);
-    return `${heads}<h2>To book</h2><ul class="tobook">${list.map((x) => `<li class="tb-row">
+    const row = (x, step) => `<li class="tb-row">
         <button type="button" class="row" data-cell="${esc(x.lane.key)}@${x.first}">
-          <span class="row-top"><strong>${esc(name(x))}</strong><span class="by${E.daysBetween(NOW, x.bookBy) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(x.bookBy))}</span></span>
+          <span class="row-top"><strong>${esc(name(x))}</strong>${step === "tender" ? `<span class="by${E.daysBetween(NOW, x.bookBy) <= 2 ? " by-soon" : ""}">by ${esc(fmtShort(x.bookBy))}</span>`
+            : `<span class="by">asked ${esc(fmtShort(E.dayOfTs(x.askedOn)))}</span>`}</span>
           <span class="row-sub">${esc(when(x))}</span>
           <span class="row-sub"><span class="t-con">${x.contract} contract</span>${x.spot ? `<span class="t-spot">${x.spot} spot</span>` : ""}</span></button>
-        ${isLog ? `<button type="button" class="util small" data-bookitem="${esc(x.it.id)}">Book</button>` : ""}</li>`).join("")}</ul>
-      ${isLog ? (list.length > 1 ? `<button type="button" class="cta" data-bookall="1">Book all ${list.reduce((s, x) => s + x.trucks, 0)}</button>` : "") : `<p class="small">Logistics books these.</p>`}`;
+        ${isLog ? `<button type="button" class="util small" data-step="${step}" data-item="${esc(x.it.id)}">${step === "tender" ? "Contact" : "Said yes"}</button>` : ""}</li>`;
+    const block = (title, list, step, empty, all) => `<h2>${title}</h2>` + (list.length ? `<ul class="tobook">${list.map((x) => row(x, step)).join("")}</ul>
+      ${isLog && list.length > 1 ? `<button type="button" class="cta" data-step="${step}" data-all="1">${all} · ${plural(list.reduce((s, x) => s + x.trucks, 0), "truck")}</button>` : ""}` : `<p class="empty">${empty}</p>`);
+    return heads + extras + block("Contact carriers", contact, "tender", "Nothing to contact.", "Contact all")
+      + block("Waiting on carrier", waiting, "confirm", "No answers pending.", "All said yes") + (isLog ? "" : `<p class="small">Logistics contacts the carriers.</p>`);
   }
 
   function live(items) {
@@ -637,7 +721,7 @@ function calendarView(store, state) {
     const shown = rows.filter((r) => showAll || r.busy);
     const group = (kind, title) => shown.filter((r) => r.lane.kind === kind).map((r, i) => `<tr>
         <th scope="row">${i === 0 ? `<span class="grp">${title}</span>` : ""}${r.lane.kind === "order" ? `${esc(custName(r.lane.destination))}<span class="city">${esc(r.lane.destination)}</span>` : esc(r.lane.destination)}
-          <span class="city">${r.perDay}/day on contract${r.expected ? ` · <span class="exp">${r.expected} more expected</span>` : ""}</span></th>
+          <span class="city">${r.perDay}/day on contract${r.expected ? ` · <span class="exp">${r.expected} more expected</span>` : ""}${linedUp(items, start, r.lane.key).map((x) => ` · <span class="lined-note">${x.data.n > 0 ? `+${x.data.n} extra lined up` : `${-x.data.n} fewer`}</span>`).join("")}</span></th>
         ${r.cells.map((c) => {
           const key = `${r.lane.key}@${c.day}`;
           const cls = [c.spot ? "c-spot" : c.counter ? "c-ctr" : c.toBook ? "c-book" : "", c.day < NOW ? "c-past" : "", pick === key ? "c-pick" : ""].join(" ");
@@ -653,32 +737,10 @@ function calendarView(store, state) {
 
   // Calendar: every planning week, one box per day, one line per lane with loads that day.
   function month(items) {
-    const weeks = Array.from({ length: RULES.weeks }, (_, w) => E.calendar(items, NOW, w));
-    const first = weeks[0][0].cells[0].day, last = weeks.at(-1)[0].cells.at(-1).day;
-    $("#w-label").textContent = `${fmtShort(first)} – ${fmtShort(last)}`;
-    const load = (r, c) => {
-      const n = c.moves.reduce((s, m) => s + m.n, 0);
-      const k = c.spot ? "spot" : c.counter ? "ctr" : c.checking === n ? "chk" : c.toBook ? "open" : "con";
-      const key = `${r.lane.key}@${c.day}`;
-      const name = r.lane.kind === "order" ? custName(r.lane.destination) : r.lane.destination.split(",")[0];
-      const extra = c.spot && c.spot < n ? ` · ${c.spot} spot` : c.counter && c.counter < n ? ` · ${c.counter} short` : "";
-      return `<button type="button" class="m-load m-${k}${pick === key ? " c-pick" : ""}" data-cell="${esc(key)}" title="${esc(r.lane.destination)}">
-        <span class="m-name">${r.lane.kind === "transfer" ? `<span class="m-tag">WH</span>` : ""}${esc(name)}</span><b>${n}${esc(extra)}</b></button>`;
-    };
-    const day = (rows, i) => {
-      const d = rows[0].cells[i].day, dt = E.atNoon(d);
-      const busy = rows.filter((r) => r.cells[i].moves.length);
-      const n = busy.reduce((s, r) => s + r.cells[i].moves.reduce((t, m) => t + m.n, 0), 0);
-      const num = d === first || dt.getDate() === 1 ? fmtShort(d) : dt.getDate();
-      return `<div class="m-day${d === NOW ? " m-today" : ""}${d < NOW ? " m-past" : ""}">
-        <div class="m-top"><span class="m-num">${esc(num)}</span>${n ? `<span class="m-tot">${plural(n, "truck")}</span>` : ""}</div>
-        ${busy.map((r) => load(r, r.cells[i])).join("")}</div>`;
-    };
-    $("#cal").innerHTML = `<div class="month">
-      ${weeks[0][0].cells.map((c) => `<div class="m-dow">${esc(dow(c.day))}</div>`).join("")}
-      ${weeks.map((rows) => rows[0].cells.map((_, i) => day(rows, i)).join("")).join("")}</div>
-      ${weeks.some((rows) => rows.some((r) => r.busy)) ? "" : `<p class="empty">No trucks yet. Accepted orders and scheduled prebuilds show up here.</p>`}`;
-    $("#cal-side").innerHTML = side(items, weeks[wk]);
+    const g = monthGrid(items, linedUp, linedText, pick);
+    $("#w-label").textContent = g.label;
+    $("#cal").innerHTML = g.html;
+    $("#cal-side").innerHTML = side(items, E.calendar(items, NOW, wk));
   }
 
   return { html, mount, live };
@@ -701,8 +763,8 @@ function transfersView(store, state) {
         const it = byId(fresh, b.dataset.sched);
         const o = E.transferOptions(fresh, it, NOW)[b.dataset.how];
         const at = stamp();
-        await store.update(it.id, { status: "booked", data: { ...it.data, days: o.days, booked: Object.fromEntries(o.days.map((d) => [d.day, at])) } });
-        toast(b.dataset.how === "paced" ? `Scheduled over ${plural(o.days.length, "day")}: ${o.contract} on contract.` : `Shipped as one batch: ${o.spot} spot.`);
+        await store.update(it.id, { status: "booked", data: { ...it.data, days: o.days, tendered: {}, booked: {}, scheduled: at } });
+        toast(`${b.dataset.how === "paced" ? `Scheduled over ${plural(o.days.length, "day")}: ${o.contract} on contract.` : `One batch: ${o.spot} spot.`} Next: contact carriers on Lanes.`);
         state.refresh();
       } catch (err) { toast("Couldn't save: " + err.message, true); b.disabled = false; }
     });
@@ -855,6 +917,8 @@ function execView(store, state) {
     <div id="x-cards" class="x-cards"></div>
     <div id="x-watch" class="x-watch"></div>
     <div id="x-cost" class="x-cost"></div>
+    <div class="x-cal"><div class="x-cal-head"><p class="big-label">What's going out · <span id="x-cal-range"></span></p>
+      <a class="linkish" href="${hubLink("logistics", "calendar")}">Open in Logistics ${icon("right")}</a></div>${LEGEND}<div id="x-cal" class="readonly"></div></div>
   </section>`;
 
   function live(items) {
@@ -881,7 +945,7 @@ function execView(store, state) {
       card("Planning", d.planning.leadDays == null ? "–" : `${Math.round(d.planning.leadDays)} days`, "forecast warning", resolvedGuard, null, [[waiting("planning"), "waiting"]]) +
       card("Logistics", d.logistics.trucks ? pct(d.logistics.spotShare) : "–", `spot${d.logistics.acceptance == null ? "" : ` · ${pct(d.logistics.acceptance)} carrier acceptance`}`, `On-time ${p(d.onTime)}`,
         d.logistics.trucks ? d.logistics.spotShare <= RULES.spotGoal : null,
-        [[waiting("logistics"), "waiting"], [E.toBookItems(items, NOW).length, "to book"], [items.filter((x) => x.type === "transfer" && x.status === "waiting").length, "to schedule"]]);
+        [[waiting("logistics"), "waiting"], [E.toBookItems(items, NOW).length, "to contact"], [E.waitingItems(items, NOW).length, "waiting on carrier"], [items.filter((x) => x.type === "transfer" && x.status === "waiting").length, "to schedule"]]);
     // Bottom row: watch list.
     const ewName = (l) => (l.kind === "order" ? custName(l.destination) : l.destination.split(",")[0]);
     const zoneChip = { R: `<span class="z z-R">Red</span>`, Y: `<span class="z z-Y">Yellow</span>`, C: `<span class="z z-C">Covered</span>` };
@@ -901,6 +965,10 @@ function execView(store, state) {
     $("#x-cost").innerHTML = d.cost.length ? `<p class="big-label">Cost to serve, by customer</p><table class="tbl x-tbl"><thead><tr><th></th><th>Loads</th><th>Freight</th><th>+ Spot</th><th>+ Holding</th><th>− Fees</th><th>Per load</th></tr></thead><tbody>
       ${d.cost.map((r) => `<tr><th scope="row">${esc(rowName(r.key))}</th><td>${r.loads}</td><td>${money(r.freight)}</td><td>${money(r.spot)}</td><td>${money(r.holding)}</td><td>${money(r.fees)}</td><td><b>${money(r.perLoad)}</b></td></tr>`).join("")}</tbody></table>
       <p class="x-sub">Claims and write-offs: measured in the pilot.</p>` : "";
+    // What's going out, where and when (read-only; Logistics works from its own calendar).
+    const g = monthGrid(items, linedUp, linedText);
+    $("#x-cal-range").textContent = g.label;
+    $("#x-cal").innerHTML = g.html;
   }
 
   return { html, live };
@@ -971,7 +1039,7 @@ async function main() {
     // Hubs across the top (with what's waiting on each); the hub's own tabs underneath.
     const waiting = (d) => (TEAMS.includes(d) ? orders(items).filter((x) => E.stageOf(x) === "checking" && !x.data.signoffs?.[d]).length : 0);
     const tabCount = (d, t) => (t === "orders" ? waiting(d) : d !== "logistics" ? 0
-      : t === "calendar" ? E.toBookItems(items, NOW).length + E.warnings(items, NOW).length : t === "transfers" ? items.filter((x) => x.type === "transfer" && x.status === "waiting").length : 0);
+      : t === "calendar" ? E.toBookItems(items, NOW).length + E.waitingItems(items, NOW).length + E.warnings(items, NOW).length : t === "transfers" ? items.filter((x) => x.type === "transfer" && x.status === "waiting").length : 0);
     const hubCount = (d) => Object.keys(HUBS[d].tabs).reduce((s, t) => s + tabCount(d, t), 0);
     const badge = (n) => (n ? ` <span class="count">${n}</span>` : "");
     $("#nav").innerHTML = Object.entries(HUBS).map(([d, h]) =>

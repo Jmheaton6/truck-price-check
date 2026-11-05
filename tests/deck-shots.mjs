@@ -30,31 +30,32 @@ await p.fill('[data-fw="4"]', "1.4"); await p.dispatchEvent('[data-fw="4"]', "in
 await shot("02 Customer HQ - forecast and order"); await btn("Share forecast");
 await hub("planning", "shortterm"); await shot("03 Planning - short-term forecast and prebuild");
 await btn("Send to Logistics");
-await hub("logistics", "calendar"); await shot("04 Logistics - early warning"); await btn("Add 2");
+await hub("logistics", "calendar"); await shot("04 Logistics - early warning"); await btn("Line up 2 more");
 
 // 2. Logistics paces the prebuild: one batch vs paced waves
 await hub("logistics", "transfers"); await shot("05 Logistics - prebuild one batch vs paced");
 await btn("Schedule");
 
-// 3. Coca-Cola orders; the four teams check it
-await go("?role=customer" + Q);
-await p.fill("#c-m", "0.6"); await p.dispatchEvent("#c-m", "input"); await p.fill("#c-date", "2026-11-19"); await p.dispatchEvent("#c-date", "change");
-await btn("Send order");
-await hub("sales", "orders"); await shot("06 Sales - check with price tag and reliability"); await btn("Accept");
-await accept("inventory"); await accept("planning");
-await hub("logistics", "orders"); await shot("07 Logistics - routing guide check"); await btn("Accept");
-await hub("logistics", "calendar", "&week=2"); await shot("08 Logistics - lanes calendar to book");
-await btn("Book");
+// Logistics contacts the prebuild's carriers, then records their yes
+await hub("logistics", "calendar"); await shot("06 Logistics - contact carriers");
+await btn("Contact"); await shot("07 Logistics - waiting on carrier");
+await btn("Said yes");
 
-// 4. A late change doesn't fit the routing guide: counteroffer, not spot
-await go("?role=customer&tab=pos" + Q); await btn("Change"); await p.fill("#e-m", "1"); await p.dispatchEvent("#e-m", "input");
-await shot("09 Customer HQ - change request"); await btn("Send change");
-await accept("sales"); await accept("inventory"); await accept("planning");
-await hub("logistics", "orders"); await shot("10 Logistics - no carrier has room");
+// 3. Coca-Cola orders 5 truckloads for one day; the four teams check it
+await go("?role=customer" + Q);
+await p.fill("#c-m", "1"); await p.dispatchEvent("#c-m", "input"); await p.fill("#c-date", "2026-11-19"); await p.dispatchEvent("#c-date", "change");
+await btn("Send order");
+await hub("sales", "orders"); await shot("08 Sales - check, what my accept does"); await btn("Accept");
+await accept("inventory"); await accept("planning");
+await hub("logistics", "orders"); await shot("09 Logistics - no carrier has room, split counteroffer");
+
+// 4. Spread, not spot: the customer takes the split
 await p.getByRole("button", { name: /^Counteroffer/ }).first().click(); await p.waitForTimeout(450);
-await go("?role=customer&tab=pos" + Q); await shot("11 Customer HQ - counteroffer or expedite");
-await p.getByRole("button", { name: /^Take / }).first().click(); await p.waitForTimeout(450);
-await hub("logistics", "calendar", "&week=2"); await shot("12 Logistics - lanes after counteroffer");
+await go("?role=customer&tab=pos" + Q); await shot("10 Customer HQ - split or expedite");
+await p.getByRole("button", { name: /^Take/ }).first().click(); await p.waitForTimeout(450);
+await hub("logistics", "calendar"); await shot("11 Logistics - calendar after the split");
+await btn("Contact"); await btn("Said yes");
+await shot("12 Logistics - all confirmed");
 
 // 5. The rest of Ball HQ
 await hub("sales", "customers"); await shot("13 Sales - customer reliability");

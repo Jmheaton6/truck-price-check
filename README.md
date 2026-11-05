@@ -14,7 +14,7 @@ WEEKS AHEAD: the forecast flow
   Logistics · Transfers ──paced waves, 3+ days ahead──▶ Carriers
   Planning · Short-term ──forecast loads───▶ Logistics · Lanes ("N more expected")
   Early warning: each week's trucks vs the routing guide (green ≤10% off · yellow 10–25% · red 25%+)
-      yellow/red week ──▶ Logistics · Lanes to-do ──▶ "Add N" from a carrier (or "Tell carriers −N")
+      yellow/red week ──▶ Logistics · Lanes to-do ──▶ "Line up N more" from a carrier (or "Tell carriers N fewer"); shown as a dashed bar under that week
       the extra trucks are real: the tender uses them after the routing guide, before a counteroffer
 
 ORDERS: a PO or a change
@@ -23,7 +23,7 @@ ORDERS: a PO or a change
       Inventory .... labeled stock, stranded cans on a cut
       Planning ..... line time that week, production freeze
       Logistics .... routing guide: primary (3+ days' notice) → backup 1 → backup 2
-  All 4 accept ──▶ Logistics books it on Lanes
+  All 4 accept ──▶ Logistics on Lanes: contact carrier → waiting on carrier → confirmed
   No carrier has room ──▶ Logistics: Counteroffer [date] ──▶ Customer HQ
       Take the date ──▶ contract
       Keep their date ──▶ spot + expedite fee (the lane's spot premium) on their PO
@@ -49,6 +49,8 @@ Old links still work (`?role=review|schedule|dashboard|sales|production|outlook`
 
 ## The rules (all in `engine.js`)
 - **Routing guide** (real, workbook): each Monticello lane's top 3 contract carriers by 2026 contract loads. A carrier's weekly commitment = its 2026 contract loads on the lane ÷ 30.3 weeks, rounded up; daily share = weekly ÷ 7, rounded up. A contract carrier named "Spot Freight" is left out so no one confuses it with spot.
+- **Split counteroffer:** when one day has more trucks than the routing guide takes, Logistics first offers to ship the rest over the next 1–2 days (the deck: shift up to 2 days before spot), then a new date, then spot the customer pays for.
+- **Carrier states:** every truck day is contact carrier (outline) → waiting on carrier (half) → confirmed (solid), on the calendar and on Executive's read-only calendar.
 - **Tender:** the whole load goes to the first carrier in the routing guide that can take all of it (primary only with 3+ days' notice; each carrier up to its daily share and what's left of its weekly commitment). If none can, it splits down the guide: primary, backup 1, backup 2. Booked loads hold their trucks; the rest go in line with Priority customers first, then first come, first served.
 - **Short:** a customer order gets a counteroffer, the nearest date (±2 weeks) where every check passes and every truck is on contract. Kept date = spot, and the customer pays the lane's spot premium per spot truck. A prebuild shipped in one batch goes spot for whatever doesn't fit.
 - **Paced waves:** a prebuild is spread day by day from its ready date (3+ days out, so the primary can take it), as many per day as the routing guide still has room for.
