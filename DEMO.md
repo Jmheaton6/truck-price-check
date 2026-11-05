@@ -52,7 +52,7 @@
 # Full demo script (about 4 minutes, one presenter)
 
 **Link:** https://jmheaton6.github.io/truck-price-check/ (on Thu Nov 5 the app's date is already right).
-**Rehearsal or no Wi-Fi:** http://localhost:8765/?local&today=2026-11-05 (or add `?local&today=2026-11-05` to the live link).
+**No Wi-Fi:** http://localhost:8765/?local (needs the local server). The app always runs on today's date, Mountain time.
 
 **Before you start:** click **Reset demo** (top right). On the live site, type the PIN. It clears everything and opens the home page on Nov 5.
 

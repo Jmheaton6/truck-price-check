@@ -1,10 +1,12 @@
-import * as E from "./engine.js?v=54";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=54";
+import * as E from "./engine.js?v=55";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=55";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
-const NOW = PARAMS.get("today") || E.isoDate(new Date()); // ?today=2026-11-05 to rehearse a date
-const DEMO_DAY = "2026-11-05"; // the demo story starts here (competition day)
+// Today in Mountain time (Ball's demo room is in Utah), so every laptop shows the same date.
+// ?today=2026-11-05 still works for scripted rehearsals and screenshots.
+const mountainToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const NOW = PARAMS.get("today") || mountainToday();
 const FORCE_LOCAL = PARAMS.has("local");                   // ?local = backup if the room's Wi-Fi fails
 
 // Ball HQ: one hub per department, each with its own tabs. Anyone can open any hub (the demo acts as all of them);
@@ -1009,7 +1011,7 @@ async function main() {
     try {
       await store.reset(pin);
       ["bc_company", "bc_dept", "bc_tab"].forEach((k) => localStorage.removeItem(k));
-      const q = [FORCE_LOCAL ? "local" : "", NOW !== DEMO_DAY || PARAMS.get("today") ? `today=${DEMO_DAY}` : ""].filter(Boolean).join("&");
+      const q = FORCE_LOCAL ? "local" : "";
       location.href = "./" + (q ? "?" + q : "");
     } catch (err) { toast("Not reset: " + err.message, true); }
   });
@@ -1040,17 +1042,14 @@ async function main() {
   drawNav();
   const notes = [];
   if (!store.live) notes.push(FORCE_LOCAL ? "Backup mode: this laptop only" : "Local mode");
-  if (notes.length || PARAMS.get("today")) {
-    // Rehearsal: pick the app's "today" to show what happens days later (a late order, a missed book-by date).
+  // The app runs on today's date (Mountain time). A link with ?today= (a scripted rehearsal) says so, with a way back.
+  if (PARAMS.get("today") && PARAMS.get("today") !== mountainToday()) {
+    const q = new URLSearchParams(location.search); q.delete("today");
+    notes.push(`Showing ${fmtDate(NOW)} · <a href="?${q.toString().replace(/local=(&|$)/, "local$1")}">Use today</a>`);
+  }
+  if (notes.length) {
     $("#mode-banner").hidden = false;
-    $("#mode-banner").innerHTML = esc(notes.join(" · ")) + (PARAMS.get("today")
-      ? `${notes.length ? " · " : ""}<label class="today">Today <input type="date" id="today-pick" value="${NOW}" aria-label="Today"></label>` : "");
-    $("#today-pick")?.addEventListener("change", (e) => {
-      if (!e.target.value) return;
-      const q = new URLSearchParams(location.search);
-      q.set("today", e.target.value);
-      location.search = q.toString().replace(/local=(&|$)/, "local$1");
-    });
+    $("#mode-banner").innerHTML = notes.map((n) => (n.includes("<a ") ? n : esc(n))).join(" · ");
   }
   document.title = portal === "customer" ? `${CUST_TABS[custTab]} · Customer HQ` : portal === "ball" ? `${HUBS[hub].tabs[role]} · ${HUBS[hub].name} · Ball HQ` : "Ball · Monticello pilot";
 

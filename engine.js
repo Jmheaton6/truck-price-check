@@ -5,7 +5,7 @@
 // (it needs 48+ hours' notice), then backup 1, then backup 2. If none has room that day, a customer gets a
 // counteroffer date; if they keep their date, it goes spot and they pay the spot premium as an expedite fee.
 // Spot is the last resort.
-import { LANES, MONTHLY } from "./lanes.js?v=54";
+import { LANES, MONTHLY } from "./lanes.js?v=55";
 export { MONTHLY };
 
 export const RULES = {
