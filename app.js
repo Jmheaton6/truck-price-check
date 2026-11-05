@@ -1,5 +1,5 @@
-import * as E from "./engine.js?v=58";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=58";
+import * as E from "./engine.js?v=59";
+import { SUPABASE_URL, SUPABASE_KEY } from "./config.js?v=59";
 
 const { RULES, PILOT_LANES, SIM_CUSTOMERS, TEAMS, STAGES } = E;
 const PARAMS = new URLSearchParams(location.search);
@@ -1016,7 +1016,7 @@ async function main() {
     + `<button type="button" id="reset-demo" class="reset-demo">Reset demo</button>`;
 
   const store = withForecasts(await makeStore());
-  // Reset demo: clear every order, forecast, prebuild and extra truck, forget the last company and hub,
+  // Reset demo: clear every order, forecast, prebuild and extra truck, add Coca-Cola's booked PO, forget the last company and hub,
   // and start over on the home page on demo day. The live database needs the admin PIN.
   $("#reset-demo").addEventListener("click", async () => {
     const pin = store.live ? prompt("Admin PIN to reset the demo:") : "local";
@@ -1024,6 +1024,7 @@ async function main() {
     if (!store.live && !confirm("Reset the demo? This clears everything.")) return;
     try {
       await store.reset(pin);
+      for (const row of E.demoSeed(NOW, stamp())) await store.add(row); // Coca-Cola's PO is already in
       ["bc_company", "bc_dept", "bc_tab"].forEach((k) => localStorage.removeItem(k));
       const q = FORCE_LOCAL ? "local" : "";
       location.href = "./" + (q ? "?" + q : "");
